@@ -7,8 +7,10 @@ class TriptychAudioProcessor;
 // A simple, functional v0.1 editor: one rotary slider per parameter, bound
 // to the APVTS via SliderAttachment, arranged as a top strip (crossover
 // splits + master output) above three per-band columns (Low/Mid/High), each
-// column holding Threshold/Ratio/Attack/Release/Makeup in signal-flow order.
-// A custom vector-drawn GUI is a later milestone; this is deliberately plain
+// column holding Mute/Solo toggles above Threshold/Ratio/Attack/Release/
+// Makeup knobs in signal-flow order. The High column additionally carries
+// the M1 high-band limiter option (an enable toggle + threshold knob). A
+// custom vector-drawn GUI is a later milestone; this is deliberately plain
 // but fully wired and usable.
 class TriptychAudioProcessorEditor final : public juce::AudioProcessorEditor
 {
@@ -20,6 +22,7 @@ public:
 
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
     struct Knob
     {
@@ -28,9 +31,18 @@ private:
         std::unique_ptr<SliderAttachment> attachment;
     };
 
-    // One band's five knobs, in signal-flow order.
-    struct BandKnobs
+    struct Toggle
     {
+        juce::ToggleButton button;
+        std::unique_ptr<ButtonAttachment> attachment;
+    };
+
+    // One band's Mute/Solo pair plus its five compression knobs, in
+    // signal-flow order.
+    struct BandControls
+    {
+        Toggle mute;
+        Toggle solo;
         Knob threshold;
         Knob ratio;
         Knob attack;
@@ -39,6 +51,7 @@ private:
     };
 
     void configureKnob (Knob& knob, const juce::String& parameterId, const juce::String& labelText);
+    void configureToggle (Toggle& toggle, const juce::String& parameterId, const juce::String& labelText);
     void configureBandLabel (juce::Label& label, const juce::String& text);
 
     TriptychAudioProcessor& audioProcessor;
@@ -52,9 +65,13 @@ private:
     juce::Label midBandLabel;
     juce::Label highBandLabel;
 
-    BandKnobs lowKnobs;
-    BandKnobs midKnobs;
-    BandKnobs highKnobs;
+    BandControls lowControls;
+    BandControls midControls;
+    BandControls highControls;
+
+    // High-band limiter option (M1) - High column only.
+    Toggle highLimiterEnabledToggle;
+    Knob highLimiterThresholdKnob;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TriptychAudioProcessorEditor)
 };

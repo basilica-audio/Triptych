@@ -126,6 +126,17 @@ void TriptychEngine::process (juce::dsp::AudioBlock<float>& block)
     midBand.process (midBlock);
     highBand.process (highBlock);
 
+    // Per-band Mute/Solo (M1): resolved once per block into a plain 0/1 gain
+    // per band, console-style - Mute always wins; if any band is soloed,
+    // only soloed (and unmuted) bands reach the sum. Each band's own
+    // compressor/limiter above still runs unconditionally regardless of
+    // mute/solo state, so envelope followers stay continuous and there is no
+    // pop when a band is unmuted mid-playback.
+    const auto anySoloed = lowSoloed || midSoloed || highSoloed;
+    const auto lowGain = (! lowMuted && (! anySoloed || lowSoloed)) ? 1.0f : 0.0f;
+    const auto midGain = (! midMuted && (! anySoloed || midSoloed)) ? 1.0f : 0.0f;
+    const auto highGain = (! highMuted && (! anySoloed || highSoloed)) ? 1.0f : 0.0f;
+
     // Sum the three processed bands back into the working block (the host's
     // own buffer memory).
     for (size_t channel = 0; channel < numChannels; ++channel)
@@ -136,7 +147,7 @@ void TriptychEngine::process (juce::dsp::AudioBlock<float>& block)
         const auto* highData = highBlock.getChannelPointer (channel);
 
         for (size_t sample = 0; sample < numSamples; ++sample)
-            out[sample] = lowData[sample] + midData[sample] + highData[sample];
+            out[sample] = lowData[sample] * lowGain + midData[sample] * midGain + highData[sample] * highGain;
     }
 
     juce::dsp::ProcessContextReplacing<float> context (workingBlock);

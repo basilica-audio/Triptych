@@ -7,6 +7,8 @@ void BandCompressor::prepare (const juce::dsp::ProcessSpec& spec)
     makeupGain.setRampDurationSeconds (smoothingTimeSeconds);
     makeupGain.prepare (spec);
 
+    limiter.prepare (spec);
+
     thresholdSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
     thresholdSmoothed.setCurrentAndTargetValue (lastThresholdDb);
     ratioSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
@@ -19,12 +21,16 @@ void BandCompressor::prepare (const juce::dsp::ProcessSpec& spec)
     // juce::dsp::Compressor's built-in defaults (0 dB threshold, 1:1 ratio).
     compressor.setThreshold (lastThresholdDb);
     compressor.setRatio (lastRatio);
+
+    limiter.setThreshold (lastLimiterThresholdDb);
+    limiter.setRelease (limiterReleaseMs);
 }
 
 void BandCompressor::reset()
 {
     compressor.reset();
     makeupGain.reset();
+    limiter.reset();
 }
 
 void BandCompressor::setThresholdDb (float newThresholdDb)
@@ -54,6 +60,12 @@ void BandCompressor::setMakeupDb (float newMakeupDb)
     makeupGain.setGainDecibels (newMakeupDb);
 }
 
+void BandCompressor::setLimiterThresholdDb (float newThresholdDb)
+{
+    lastLimiterThresholdDb = newThresholdDb;
+    limiter.setThreshold (newThresholdDb);
+}
+
 void BandCompressor::process (juce::dsp::AudioBlock<float>& block) noexcept
 {
     const auto numSamples = block.getNumSamples();
@@ -71,4 +83,11 @@ void BandCompressor::process (juce::dsp::AudioBlock<float>& block) noexcept
     juce::dsp::ProcessContextReplacing<float> context (block);
     compressor.process (context);
     makeupGain.process (context);
+
+    // The optional limiter stage always runs so its internal ballistics
+    // state stays continuous while toggled on/off (no pop on enable); when
+    // disabled it just copies the block through (see setLimiterEnabled's
+    // doc comment in BandCompressor.h).
+    context.isBypassed = ! limiterEnabled;
+    limiter.process (context);
 }

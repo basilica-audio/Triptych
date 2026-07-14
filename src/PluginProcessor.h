@@ -77,6 +77,20 @@ private:
     std::atomic<float>* highReleaseMs = nullptr;
     std::atomic<float>* highMakeupDb = nullptr;
 
+    // Per-band Mute/Solo (M1). AudioParameterBool's raw APVTS value is
+    // 0.0f/1.0f, thresholded at 0.5f in pushParametersToEngine() - the same
+    // atomic-read pattern used for every other parameter here.
+    std::atomic<float>* lowMuteOn = nullptr;
+    std::atomic<float>* lowSoloOn = nullptr;
+    std::atomic<float>* midMuteOn = nullptr;
+    std::atomic<float>* midSoloOn = nullptr;
+    std::atomic<float>* highMuteOn = nullptr;
+    std::atomic<float>* highSoloOn = nullptr;
+
+    // High-band limiter option (M1).
+    std::atomic<float>* highLimiterEnabledOn = nullptr;
+    std::atomic<float>* highLimiterThresholdDb = nullptr;
+
     std::atomic<float>* outputDb = nullptr;
 
     // Reads every APVTS atomic and pushes the current values into `engine`.

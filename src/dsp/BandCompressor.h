@@ -45,11 +45,32 @@ public:
     void setReleaseMs (float newReleaseMs);
     void setMakeupDb (float newMakeupDb);
 
+    // Optional post-stage brickwall limiter (M1's "high-band limiter
+    // option"; the type is generic so any band could opt in, though only
+    // the High band currently exposes it via APVTS - see TriptychEngine and
+    // ParameterIds.h). Runs after the compressor + makeup gain, so it
+    // catches whatever peaks reach the band's output including any makeup
+    // boost. juce::dsp::Limiter::process(context) supports context.isBypassed
+    // as a cheap real-time-safe copy-through (JUCE 8.0.14,
+    // juce_dsp/widgets/juce_Limiter.h - internally two Compressors and a
+    // hard clip at 0 dB, no lookahead/delay line, so this adds zero
+    // latency), so toggling this flag never needs a branch inside process().
+    void setLimiterEnabled (bool shouldBeEnabled) noexcept { limiterEnabled = shouldBeEnabled; }
+    void setLimiterThresholdDb (float newThresholdDb);
+
 private:
     static constexpr double smoothingTimeSeconds = 0.05;
 
+    // Fixed release for the optional limiter stage - a fast-ish safety
+    // ceiling rather than a musical dynamics control, matching the "quick
+    // brickwall catch" role the High-band limiter option is meant to play.
+    static constexpr float limiterReleaseMs = 50.0f;
+
     juce::dsp::Compressor<float> compressor;
     juce::dsp::Gain<float> makeupGain;
+    juce::dsp::Limiter<float> limiter;
+    bool limiterEnabled = false;
+    float lastLimiterThresholdDb = -3.0f;
 
     // Threshold and ratio are smoothed and re-applied once per block - the
     // same block-rate-recompute compromise TriptychEngine/OvertureEngine use

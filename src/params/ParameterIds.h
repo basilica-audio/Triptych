@@ -40,6 +40,25 @@ namespace ParamIDs
     inline constexpr auto highRelease = "highRelease";
     inline constexpr auto highMakeup = "highMakeup";
 
+    // Per-band Mute/Solo (M1): applied at the summing stage in
+    // TriptychEngine, not inside BandCompressor itself - muting/soloing is a
+    // mix-bus decision, not part of a band's own dynamics processing.
+    // Standard console semantics: Mute always silences its band; if any band
+    // is soloed, only soloed (and unmuted) bands reach the sum.
+    inline constexpr auto lowMute = "lowMute";
+    inline constexpr auto lowSolo = "lowSolo";
+    inline constexpr auto midMute = "midMute";
+    inline constexpr auto midSolo = "midSolo";
+    inline constexpr auto highMute = "highMute";
+    inline constexpr auto highSolo = "highSolo";
+
+    // High-band limiter option (M1): an optional juce::dsp::Limiter stage
+    // after the High band's compressor + makeup gain, for taming cymbal/
+    // harmonic transients without retuning the band's compressor. Zero
+    // added latency - juce::dsp::Limiter (JUCE 8.0.14) has no lookahead.
+    inline constexpr auto highLimiterEnabled = "highLimiterEnabled";
+    inline constexpr auto highLimiterThreshold = "highLimiterThreshold";
+
     // Master output trim, applied after the three bands are summed.
     inline constexpr auto output = "output";
 }

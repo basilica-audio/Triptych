@@ -28,7 +28,10 @@
 // Neither the LR4 crossovers (minimum-phase IIR) nor juce::dsp::Compressor
 // (causal envelope follower, no lookahead) add latency, so
 // getLatencySamples() is always 0 and no dry-path delay compensation is
-// needed anywhere in this engine.
+// needed anywhere in this engine. The M1 additions below - per-band
+// Mute/Solo (resolved at the summing stage) and the High band's optional
+// juce::dsp::Limiter stage (inside BandCompressor) - are both zero-latency
+// too, so this remains true after them.
 class TriptychEngine
 {
 public:
@@ -76,6 +79,23 @@ public:
     void setHighReleaseMs (float newReleaseMs) { highBand.setReleaseMs (newReleaseMs); }
     void setHighMakeupDb (float newMakeupDb) { highBand.setMakeupDb (newMakeupDb); }
 
+    // High-band limiter option (M1). See BandCompressor::setLimiterEnabled
+    // for why toggling this is real-time safe with no added latency.
+    void setHighLimiterEnabled (bool shouldBeEnabled) noexcept { highBand.setLimiterEnabled (shouldBeEnabled); }
+    void setHighLimiterThresholdDb (float newThresholdDb) { highBand.setLimiterThresholdDb (newThresholdDb); }
+
+    // Per-band Mute/Solo (M1), applied at the summing stage below - see
+    // ParameterIds.h for the console-style semantics. Plain bools (not
+    // smoothed): a Mute/Solo toggle is a discrete mix decision, not an
+    // audio-rate gain value, matching how juce::dsp::Compressor's own
+    // Attack/Release setters are applied directly elsewhere in this engine.
+    void setLowMute (bool shouldBeMuted) noexcept { lowMuted = shouldBeMuted; }
+    void setLowSolo (bool shouldBeSoloed) noexcept { lowSoloed = shouldBeSoloed; }
+    void setMidMute (bool shouldBeMuted) noexcept { midMuted = shouldBeMuted; }
+    void setMidSolo (bool shouldBeSoloed) noexcept { midSoloed = shouldBeSoloed; }
+    void setHighMute (bool shouldBeMuted) noexcept { highMuted = shouldBeMuted; }
+    void setHighSolo (bool shouldBeSoloed) noexcept { highSoloed = shouldBeSoloed; }
+
     // Master output trim, applied after the three bands are summed.
     void setOutputDb (float newOutputDb);
 
@@ -120,6 +140,15 @@ private:
     // lets a smoother ramp from an invalid 0 Hz starting point.
     float lastLowMidSplitHz = 200.0f;
     float lastMidHighSplitHz = 3000.0f;
+
+    // Per-band Mute/Solo state (M1), all off by default so their addition
+    // never changes existing default behaviour.
+    bool lowMuted = false;
+    bool lowSoloed = false;
+    bool midMuted = false;
+    bool midSoloed = false;
+    bool highMuted = false;
+    bool highSoloed = false;
 
     double sampleRate = 44100.0;
 

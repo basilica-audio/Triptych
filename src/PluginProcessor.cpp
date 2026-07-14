@@ -31,6 +31,16 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     highReleaseMs = apvts.getRawParameterValue (ParamIDs::highRelease);
     highMakeupDb = apvts.getRawParameterValue (ParamIDs::highMakeup);
 
+    lowMuteOn = apvts.getRawParameterValue (ParamIDs::lowMute);
+    lowSoloOn = apvts.getRawParameterValue (ParamIDs::lowSolo);
+    midMuteOn = apvts.getRawParameterValue (ParamIDs::midMute);
+    midSoloOn = apvts.getRawParameterValue (ParamIDs::midSolo);
+    highMuteOn = apvts.getRawParameterValue (ParamIDs::highMute);
+    highSoloOn = apvts.getRawParameterValue (ParamIDs::highSolo);
+
+    highLimiterEnabledOn = apvts.getRawParameterValue (ParamIDs::highLimiterEnabled);
+    highLimiterThresholdDb = apvts.getRawParameterValue (ParamIDs::highLimiterThreshold);
+
     outputDb = apvts.getRawParameterValue (ParamIDs::output);
 
     jassert (lowMidSplitHz != nullptr);
@@ -50,6 +60,14 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     jassert (highAttackMs != nullptr);
     jassert (highReleaseMs != nullptr);
     jassert (highMakeupDb != nullptr);
+    jassert (lowMuteOn != nullptr);
+    jassert (lowSoloOn != nullptr);
+    jassert (midMuteOn != nullptr);
+    jassert (midSoloOn != nullptr);
+    jassert (highMuteOn != nullptr);
+    jassert (highSoloOn != nullptr);
+    jassert (highLimiterEnabledOn != nullptr);
+    jassert (highLimiterThresholdDb != nullptr);
     jassert (outputDb != nullptr);
 }
 
@@ -133,6 +151,16 @@ void TriptychAudioProcessor::pushParametersToEngine()
     engine.setHighAttackMs (highAttackMs->load (std::memory_order_relaxed));
     engine.setHighReleaseMs (highReleaseMs->load (std::memory_order_relaxed));
     engine.setHighMakeupDb (highMakeupDb->load (std::memory_order_relaxed));
+
+    engine.setLowMute (lowMuteOn->load (std::memory_order_relaxed) > 0.5f);
+    engine.setLowSolo (lowSoloOn->load (std::memory_order_relaxed) > 0.5f);
+    engine.setMidMute (midMuteOn->load (std::memory_order_relaxed) > 0.5f);
+    engine.setMidSolo (midSoloOn->load (std::memory_order_relaxed) > 0.5f);
+    engine.setHighMute (highMuteOn->load (std::memory_order_relaxed) > 0.5f);
+    engine.setHighSolo (highSoloOn->load (std::memory_order_relaxed) > 0.5f);
+
+    engine.setHighLimiterEnabled (highLimiterEnabledOn->load (std::memory_order_relaxed) > 0.5f);
+    engine.setHighLimiterThresholdDb (highLimiterThresholdDb->load (std::memory_order_relaxed));
 
     engine.setOutputDb (outputDb->load (std::memory_order_relaxed));
 }

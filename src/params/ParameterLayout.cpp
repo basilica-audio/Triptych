@@ -72,6 +72,20 @@ namespace
             0.0f,
             juce::AudioParameterFloatAttributes().withLabel ("dB")));
     }
+
+    // Adds a band's Mute/Solo pair, both defaulting to off so adding these
+    // parameters never changes existing default behaviour.
+    void addMuteSoloParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout,
+                                 const char* muteId,
+                                 const char* soloId,
+                                 const juce::String& labelPrefix)
+    {
+        layout.add (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { muteId, 1 }, labelPrefix + " Mute", false));
+
+        layout.add (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { soloId, 1 }, labelPrefix + " Solo", false));
+    }
 }
 
 namespace trpt
@@ -115,6 +129,27 @@ namespace trpt
         addBandParameters (layout,
                             ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
                             "High");
+
+        //======================================================================
+        // Per-band Mute/Solo (M1). See ParameterIds.h for the console-style
+        // semantics (Mute always wins; Solo isolates unmuted soloed bands).
+        addMuteSoloParameters (layout, ParamIDs::lowMute, ParamIDs::lowSolo, "Low");
+        addMuteSoloParameters (layout, ParamIDs::midMute, ParamIDs::midSolo, "Mid");
+        addMuteSoloParameters (layout, ParamIDs::highMute, ParamIDs::highSolo, "High");
+
+        //======================================================================
+        // High-band limiter option (M1): off by default so adding it never
+        // changes existing default behaviour. Threshold -24 to 0 dB, default
+        // -3 dB (a typical safety-ceiling setting for cymbal/harmonic peaks).
+        layout.add (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { ParamIDs::highLimiterEnabled, 1 }, "High Limiter Enabled", false));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { ParamIDs::highLimiterThreshold, 1 },
+            "High Limiter Threshold",
+            juce::NormalisableRange<float> (-24.0f, 0.0f, 0.01f),
+            -3.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("dB")));
 
         //======================================================================
         // Output: master trim after the three bands are summed, -24 to +24 dB.

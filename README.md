@@ -10,9 +10,9 @@
 <!-- ==BEGIN BODY== (plugin engineer: replace this block with What it is / Features / Signal flow / Roadmap) -->
 ## What it is
 
-Triptych is a 3-band multiband compressor built on JUCE 8, aimed at taming dense symphonic-metal mixes: two cascaded 4th-order Linkwitz-Riley (LR4) crossovers split the signal into Low/Mid/High bands, each with its own independent threshold/ratio/attack/release/makeup compressor, before the three bands are summed back together and trimmed by a master output stage. The LR4 crossover's defining property - a magnitude-flat low+high sum - means that with every band's compressor disabled, Triptych is an exact, bit-identical passthrough of the input.
+Triptych is a 3-band multiband compressor built on JUCE 8, aimed at taming dense symphonic-metal mixes: two cascaded 4th-order Linkwitz-Riley (LR4) crossovers split the signal into Low/Mid/High bands, each with its own independent threshold/ratio/attack/release/makeup compressor and Mute/Solo, before the three bands are gated and summed back together and trimmed by a master output stage. The High band can additionally engage a brickwall-style limiter. The LR4 crossover's defining property - a magnitude-flat low+high sum - means that with every band's compressor disabled, Triptych is an exact, bit-identical passthrough of the input. See [`docs/manual.md`](docs/manual.md) for the full user manual.
 
-## Features (v0.1 scope)
+## Features (v0.1.0 scope)
 
 - **Low/Mid Split** and **Mid/High Split** - crossover points, 40 Hz - 1 kHz and 400 Hz - 12 kHz respectively, with a minimum runtime separation so automation can never invert band order
 - **Per-band compression** (Low/Mid/High), each with:
@@ -21,30 +21,33 @@ Triptych is a 3-band multiband compressor built on JUCE 8, aimed at taming dense
   - **Attack** - 0.1 - 100 ms
   - **Release** - 10 - 1000 ms
   - **Makeup** - -12 to +24 dB
-- **Output** - master trim after the three bands are summed, -24 to +24 dB
-- **Zero added latency** - both the LR4 crossovers and `juce::dsp::Compressor`'s envelope follower are minimum-phase/causal, so no dry-path delay compensation is needed anywhere in the plugin
+- **Per-band Mute/Solo** (Low/Mid/High) - console-style semantics: Mute always wins, soloing isolates the soloed band(s) while their compressor keeps running underneath (no re-attack pop on unmute)
+- **High-band limiter option** - an optional brickwall-style `juce::dsp::Limiter` stage after the High band's compressor, threshold -24 to 0 dB (default -3 dB), guaranteeing the High band never exceeds 0 dBFS once engaged
+- **Output** - master trim after the three (gated) bands are summed, -24 to +24 dB
+- **Zero added latency** - the LR4 crossovers, `juce::dsp::Compressor`'s envelope follower, and the optional High-band limiter are all minimum-phase/causal with no lookahead, so no dry-path delay compensation is needed anywhere in the plugin
 - Full state save/recall via `AudioProcessorValueTreeState`
 
 ## Signal flow
 
 ```
-                    +-> BandComp (Low)  --+
-Input --> LR4 @ Low/Mid Split             |
-                    \-> LR4 @ Mid/High Split
-                              +-> BandComp (Mid)  --+--> Sum --> Output --> Out
-                              \-> BandComp (High) --+
+                    +-> BandComp (Low)  --------------------------------+
+Input --> LR4 @ Low/Mid Split             |                             |
+                    \-> LR4 @ Mid/High Split                            |
+                              +-> BandComp (Mid)  ----------------------+--> Mute/Solo gate --> Sum --> Output --> Out
+                              \-> BandComp (High) + optional Limiter ---+
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for the full breakdown, including the flat-sum crossover property, the compressor bypass identity, and parameter smoothing.
+See [`docs/architecture.md`](docs/architecture.md) for the full breakdown, including the flat-sum crossover property, the compressor bypass identity, the High-band limiter's behaviour, Mute/Solo semantics, and parameter smoothing.
 
 ## Roadmap
 
 | Milestone | Description | Status |
 |---|---|---|
 | M0 | Bootstrap - project skeleton, CI, docs | Done |
-| M1 | DSP core - LR4 crossover cascade, per-band compression, zero-latency reporting, unit tests | Done |
-| M2 | Custom GUI | Planned |
-| M3 | Release engineering - signing, notarization, installers, v1.0.0 | Planned |
+| M1 | DSP completion & test coverage - per-band Mute/Solo, High-band limiter, broadened Catch2 suite | Done (external sidechain and adjustable crossover slopes deliberately deferred - see [`docs/architecture.md`](docs/architecture.md#deferred-from-m1-external-sidechain-and-adjustable-crossover-slopes)) |
+| M2 | Presets & state recall | Planned |
+| M3 | Custom GUI & accessibility | Planned |
+| M4 | Release engineering - signing, notarization, installers, v1.0.0 | Planned |
 <!-- ==END BODY== -->
 
 ## Installation

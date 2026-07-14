@@ -86,6 +86,8 @@ TEST_CASE ("Processor instantiates with the expected parameters", "[processor][p
             ParamIDs::lowThreshold, ParamIDs::lowRatio, ParamIDs::lowAttack, ParamIDs::lowRelease, ParamIDs::lowMakeup,
             ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
             ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
+            ParamIDs::lowMute, ParamIDs::lowSolo, ParamIDs::midMute, ParamIDs::midSolo, ParamIDs::highMute, ParamIDs::highSolo,
+            ParamIDs::highLimiterEnabled, ParamIDs::highLimiterThreshold,
             ParamIDs::output,
         };
 
@@ -93,10 +95,33 @@ TEST_CASE ("Processor instantiates with the expected parameters", "[processor][p
             CHECK (apvts.getParameter (id) != nullptr);
     }
 
-    SECTION ("total parameter count matches the v0.1 layout")
+    SECTION ("total parameter count matches the v0.1.0 layout")
     {
-        // 2 splits + 3 bands * 5 + 1 output = 18.
-        CHECK (apvts.processor.getParameters().size() == 18);
+        // 2 splits + 3 bands * 5 + 3 bands * 2 (Mute/Solo) + 2 (High limiter
+        // enable/threshold) + 1 output = 26.
+        CHECK (apvts.processor.getParameters().size() == 26);
+    }
+
+    SECTION ("Mute/Solo default off for every band")
+    {
+        for (const auto* id : { ParamIDs::lowMute, ParamIDs::lowSolo,
+                                 ParamIDs::midMute, ParamIDs::midSolo,
+                                 ParamIDs::highMute, ParamIDs::highSolo })
+        {
+            auto* param = dynamic_cast<juce::AudioParameterBool*> (apvts.getParameter (id));
+            REQUIRE (param != nullptr);
+            CHECK (param->get() == false);
+        }
+    }
+
+    SECTION ("High limiter: defaults and range")
+    {
+        auto* enabledParam = dynamic_cast<juce::AudioParameterBool*> (apvts.getParameter (ParamIDs::highLimiterEnabled));
+        REQUIRE (enabledParam != nullptr);
+        CHECK (enabledParam->get() == false);
+
+        checkFloatDefault (apvts, ParamIDs::highLimiterThreshold, -3.0f);
+        checkFloatRange (apvts, ParamIDs::highLimiterThreshold, -24.0f, 0.0f);
     }
 
     SECTION ("Low/Mid split: defaults and range")

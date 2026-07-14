@@ -85,16 +85,19 @@ public:
     void setHighLimiterThresholdDb (float newThresholdDb) { highBand.setLimiterThresholdDb (newThresholdDb); }
 
     // Per-band Mute/Solo (M1), applied at the summing stage below - see
-    // ParameterIds.h for the console-style semantics. Plain bools (not
-    // smoothed): a Mute/Solo toggle is a discrete mix decision, not an
-    // audio-rate gain value, matching how juce::dsp::Compressor's own
-    // Attack/Release setters are applied directly elsewhere in this engine.
-    void setLowMute (bool shouldBeMuted) noexcept { lowMuted = shouldBeMuted; }
-    void setLowSolo (bool shouldBeSoloed) noexcept { lowSoloed = shouldBeSoloed; }
-    void setMidMute (bool shouldBeMuted) noexcept { midMuted = shouldBeMuted; }
-    void setMidSolo (bool shouldBeSoloed) noexcept { midSoloed = shouldBeSoloed; }
-    void setHighMute (bool shouldBeMuted) noexcept { highMuted = shouldBeMuted; }
-    void setHighSolo (bool shouldBeSoloed) noexcept { highSoloed = shouldBeSoloed; }
+    // ParameterIds.h for the console-style semantics. The resolved on/off
+    // decision is a discrete mix choice, but the *gain* it drives is ramped
+    // via a SmoothedValue (smoothingTimeSeconds, matching every other
+    // audible-level parameter in this engine) rather than applied as an
+    // instantaneous 1.0/0.0 step, so toggling Mute or Solo mid-playback
+    // never produces an audible click - see process()'s summing loop and
+    // updateMuteSoloGainTargets().
+    void setLowMute (bool shouldBeMuted) noexcept;
+    void setLowSolo (bool shouldBeSoloed) noexcept;
+    void setMidMute (bool shouldBeMuted) noexcept;
+    void setMidSolo (bool shouldBeSoloed) noexcept;
+    void setHighMute (bool shouldBeMuted) noexcept;
+    void setHighSolo (bool shouldBeSoloed) noexcept;
 
     // Master output trim, applied after the three bands are summed.
     void setOutputDb (float newOutputDb);
@@ -149,6 +152,25 @@ private:
     bool midSoloed = false;
     bool highMuted = false;
     bool highSoloed = false;
+
+    // Per-band Mute/Solo gain (M1), ramped over smoothingTimeSeconds so a
+    // toggle mid-playback fades rather than steps - applied sample-
+    // accurately in process()'s summing loop, the same way juce::dsp::Gain
+    // ramps makeup/output. Recomputed from the bools above by
+    // updateMuteSoloGainTargets() on every setter call and re-seeded (without
+    // an artificial fade-in) on every prepare().
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> lowMuteSoloGain;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> midMuteSoloGain;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> highMuteSoloGain;
+
+    // Recomputes lowMuteSoloGain/midMuteSoloGain/highMuteSoloGain's targets
+    // from the current Mute/Solo bools (console-style: Mute always wins; if
+    // any band is soloed, only soloed-and-unmuted bands reach the sum).
+    // `snapImmediately` selects setCurrentAndTargetValue (used in prepare(),
+    // so re-preparing a live Mute/Solo state doesn't introduce a spurious
+    // fade) vs setTargetValue (used from the setters below, so a live
+    // toggle ramps).
+    void updateMuteSoloGainTargets (bool snapImmediately);
 
     double sampleRate = 44100.0;
 

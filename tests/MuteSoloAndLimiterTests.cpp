@@ -180,6 +180,67 @@ TEST_CASE ("Mute always wins over Solo on the same band", "[dsp][engine][mute][s
     CHECK (TestHelpers::allSamplesFinite (buffer));
 }
 
+TEST_CASE ("Mute: toggling mid-playback ramps smoothly rather than stepping instantaneously", "[dsp][engine][mute][smoothing]")
+{
+    // A DC-like probe (well below Low/Mid Split) sits entirely in the Low
+    // band's passband, so once the crossover has settled, output samples
+    // directly trace the Low-band Mute/Solo gain curve: any residual from
+    // the highpassed Mid/High paths is negligible. This lets the test
+    // observe the actual per-sample gain ramp used at the summing stage
+    // rather than inferring it indirectly.
+    TriptychEngine engine;
+    bypassAllBandsForMuteSoloTest (engine);
+
+    const auto spec = makeTestSpec (1);
+    engine.prepare (spec);
+
+    constexpr int warmupSamples = 4096;
+    constexpr int rampSamples = static_cast<int> (0.05 * testSampleRate); // matches TriptychEngine's smoothingTimeSeconds
+    constexpr float dcAmplitude = 0.9f;
+
+    juce::AudioBuffer<float> warmup (1, warmupSamples);
+    for (int i = 0; i < warmupSamples; ++i)
+        warmup.setSample (0, i, dcAmplitude);
+
+    juce::dsp::AudioBlock<float> warmupBlock (warmup);
+    engine.process (warmupBlock);
+
+    // Confirm the Low-band probe has actually settled to near-unity before
+    // toggling Mute - otherwise the "no big jump" check below would be
+    // vacuous.
+    REQUIRE (warmup.getSample (0, warmupSamples - 1) == Catch::Approx (dcAmplitude).margin (0.05));
+
+    engine.setLowMute (true); // toggle mid-playback, exactly like a GUI click during audio
+
+    juce::AudioBuffer<float> afterToggle (1, rampSamples + 512);
+    for (int i = 0; i < afterToggle.getNumSamples(); ++i)
+        afterToggle.setSample (0, i, dcAmplitude);
+
+    juce::dsp::AudioBlock<float> afterBlock (afterToggle);
+    engine.process (afterBlock);
+
+    CHECK (TestHelpers::allSamplesFinite (afterToggle));
+
+    const auto* data = afterToggle.getReadPointer (0);
+    float maxAbsDelta = 0.0f;
+
+    for (int i = 1; i < afterToggle.getNumSamples(); ++i)
+        maxAbsDelta = juce::jmax (maxAbsDelta, std::abs (data[i] - data[i - 1]));
+
+    // An instantaneous 0/1 step would produce a single-sample jump of the
+    // full DC amplitude (~0.9); a ramp over ~50ms bounds every sample-to-
+    // sample step to roughly amplitude / rampSamples. Generous 10x safety
+    // margin to stay robust to crossover ripple while still failing hard on
+    // a discrete step.
+    const auto maxExpectedStep = (dcAmplitude / static_cast<float> (rampSamples)) * 10.0f;
+    CHECK (maxAbsDelta < maxExpectedStep);
+    CHECK (maxAbsDelta < 0.05f); // sanity ceiling, far below a full discrete 0.9 jump
+
+    // And it should actually have reached (near) silence by the end of the
+    // ramp window, not just "no single big jump".
+    CHECK (std::abs (data[afterToggle.getNumSamples() - 1]) < 0.01f);
+}
+
 TEST_CASE ("High limiter disabled: hard-clipping headroom is not enforced (baseline for the next test)", "[dsp][limiter]")
 {
     TriptychEngine engine;

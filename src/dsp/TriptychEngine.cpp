@@ -42,6 +42,14 @@ void TriptychEngine::prepare (const juce::dsp::ProcessSpec& spec)
     midHighSplitSmoothed.reset (sampleRate, smoothingTimeSeconds);
     midHighSplitSmoothed.setCurrentAndTargetValue (lastMidHighSplitHz);
 
+    lowMuteSoloGain.reset (sampleRate, smoothingTimeSeconds);
+    midMuteSoloGain.reset (sampleRate, smoothingTimeSeconds);
+    highMuteSoloGain.reset (sampleRate, smoothingTimeSeconds);
+    // Snap (don't ramp) to the current Mute/Solo state: re-preparing (e.g. a
+    // sample-rate change) must not introduce a spurious fade on top of a
+    // state the user already committed to.
+    updateMuteSoloGainTargets (true);
+
     reset();
 
     // Prime both crossovers' coefficients immediately so the very first
@@ -78,6 +86,64 @@ void TriptychEngine::setMidHighSplitHz (float newFrequencyHz)
 void TriptychEngine::setOutputDb (float newOutputDb)
 {
     outputGain.setGainDecibels (newOutputDb);
+}
+
+void TriptychEngine::updateMuteSoloGainTargets (bool snapImmediately)
+{
+    const auto anySoloed = lowSoloed || midSoloed || highSoloed;
+
+    const auto lowTarget = (! lowMuted && (! anySoloed || lowSoloed)) ? 1.0f : 0.0f;
+    const auto midTarget = (! midMuted && (! anySoloed || midSoloed)) ? 1.0f : 0.0f;
+    const auto highTarget = (! highMuted && (! anySoloed || highSoloed)) ? 1.0f : 0.0f;
+
+    if (snapImmediately)
+    {
+        lowMuteSoloGain.setCurrentAndTargetValue (lowTarget);
+        midMuteSoloGain.setCurrentAndTargetValue (midTarget);
+        highMuteSoloGain.setCurrentAndTargetValue (highTarget);
+    }
+    else
+    {
+        lowMuteSoloGain.setTargetValue (lowTarget);
+        midMuteSoloGain.setTargetValue (midTarget);
+        highMuteSoloGain.setTargetValue (highTarget);
+    }
+}
+
+void TriptychEngine::setLowMute (bool shouldBeMuted) noexcept
+{
+    lowMuted = shouldBeMuted;
+    updateMuteSoloGainTargets (false);
+}
+
+void TriptychEngine::setLowSolo (bool shouldBeSoloed) noexcept
+{
+    lowSoloed = shouldBeSoloed;
+    updateMuteSoloGainTargets (false);
+}
+
+void TriptychEngine::setMidMute (bool shouldBeMuted) noexcept
+{
+    midMuted = shouldBeMuted;
+    updateMuteSoloGainTargets (false);
+}
+
+void TriptychEngine::setMidSolo (bool shouldBeSoloed) noexcept
+{
+    midSoloed = shouldBeSoloed;
+    updateMuteSoloGainTargets (false);
+}
+
+void TriptychEngine::setHighMute (bool shouldBeMuted) noexcept
+{
+    highMuted = shouldBeMuted;
+    updateMuteSoloGainTargets (false);
+}
+
+void TriptychEngine::setHighSolo (bool shouldBeSoloed) noexcept
+{
+    highSoloed = shouldBeSoloed;
+    updateMuteSoloGainTargets (false);
 }
 
 void TriptychEngine::process (juce::dsp::AudioBlock<float>& block)
@@ -126,28 +192,34 @@ void TriptychEngine::process (juce::dsp::AudioBlock<float>& block)
     midBand.process (midBlock);
     highBand.process (highBlock);
 
-    // Per-band Mute/Solo (M1): resolved once per block into a plain 0/1 gain
-    // per band, console-style - Mute always wins; if any band is soloed,
-    // only soloed (and unmuted) bands reach the sum. Each band's own
-    // compressor/limiter above still runs unconditionally regardless of
-    // mute/solo state, so envelope followers stay continuous and there is no
-    // pop when a band is unmuted mid-playback.
-    const auto anySoloed = lowSoloed || midSoloed || highSoloed;
-    const auto lowGain = (! lowMuted && (! anySoloed || lowSoloed)) ? 1.0f : 0.0f;
-    const auto midGain = (! midMuted && (! anySoloed || midSoloed)) ? 1.0f : 0.0f;
-    const auto highGain = (! highMuted && (! anySoloed || highSoloed)) ? 1.0f : 0.0f;
-
+    // Per-band Mute/Solo (M1): console-style target gain (Mute always wins;
+    // if any band is soloed, only soloed-and-unmuted bands reach the sum),
+    // but applied sample-accurately via lowMuteSoloGain/midMuteSoloGain/
+    // highMuteSoloGain rather than as an instantaneous 0/1 step, so a toggle
+    // mid-playback ramps over smoothingTimeSeconds instead of clicking (see
+    // updateMuteSoloGainTargets()). Each band's own compressor/limiter above
+    // still runs unconditionally regardless of mute/solo state, so envelope
+    // followers stay continuous too.
+    //
     // Sum the three processed bands back into the working block (the host's
-    // own buffer memory).
-    for (size_t channel = 0; channel < numChannels; ++channel)
+    // own buffer memory). Sample-outer/channel-inner so each sample only
+    // advances the three gain ramps once, applying the same instantaneous
+    // gain to every channel.
+    for (size_t sample = 0; sample < numSamples; ++sample)
     {
-        auto* out = workingBlock.getChannelPointer (channel);
-        const auto* lowData = lowBlock.getChannelPointer (channel);
-        const auto* midData = midBlock.getChannelPointer (channel);
-        const auto* highData = highBlock.getChannelPointer (channel);
+        const auto lowGain = lowMuteSoloGain.getNextValue();
+        const auto midGain = midMuteSoloGain.getNextValue();
+        const auto highGain = highMuteSoloGain.getNextValue();
 
-        for (size_t sample = 0; sample < numSamples; ++sample)
+        for (size_t channel = 0; channel < numChannels; ++channel)
+        {
+            auto* out = workingBlock.getChannelPointer (channel);
+            const auto* lowData = lowBlock.getChannelPointer (channel);
+            const auto* midData = midBlock.getChannelPointer (channel);
+            const auto* highData = highBlock.getChannelPointer (channel);
+
             out[sample] = lowData[sample] * lowGain + midData[sample] * midGain + highData[sample] * highGain;
+        }
     }
 
     juce::dsp::ProcessContextReplacing<float> context (workingBlock);

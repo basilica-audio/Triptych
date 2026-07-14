@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon.png" alt="Triptych icon" width="120"/></p>
+
 # Triptych — user manual
 
 *Three panels, one altarpiece — a 3-band multiband compressor for dense mixes.*

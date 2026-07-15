@@ -87,17 +87,49 @@ void TriptychEngine::process (juce::dsp::AudioBlock<float>& block)
     if (requestedSamples == 0)
         return;
 
-    // Defensive: clamp to the per-band buffer capacity established in
-    // prepare(), in case a host ever calls process() with more samples (or
-    // channels) than it promised via prepareToPlay() - trimming the working
-    // block rather than writing out of bounds.
-    const auto numSamples = juce::jmin (requestedSamples, static_cast<size_t> (lowBuffer.getNumSamples()));
+    // Channel count is still defensively clamped to the per-band buffer
+    // capacity established in prepare() - a host that violates its own
+    // negotiated bus layout (see TriptychAudioProcessor::isBusesLayoutSupported)
+    // is not a realistic scenario the way an oversized *block* is (see
+    // below), so excess channels beyond capacity are trimmed rather than
+    // chunked.
     const auto numChannels = juce::jmin (block.getNumChannels(), static_cast<size_t> (lowBuffer.getNumChannels()));
 
-    if (numSamples == 0 || numChannels == 0)
+    if (numChannels == 0)
         return;
 
-    auto workingBlock = block.getSubBlock (0, numSamples).getSubsetChannelBlock (0, numChannels);
+    // Chunk any block larger than the per-band buffer capacity established
+    // in prepare() into <= capacity-sized pieces, each run through the full
+    // signal chain via processChunk() below, rather than defensively
+    // trimming and leaving the excess samples as unprocessed dry
+    // passthrough (issue #14) - a host is free to call process() with more
+    // samples than it declared via prepareToPlay()'s
+    // maximumExpectedSamplesPerBlock (e.g. offline bounce/render passes
+    // commonly do), and every sample the host hands us has to go through
+    // the crossover/compressor/mute-solo/output chain, not just the first
+    // prepared-capacity's worth.
+    const auto capacity = static_cast<size_t> (lowBuffer.getNumSamples());
+
+    if (capacity == 0)
+        return;
+
+    size_t position = 0;
+
+    while (position < requestedSamples)
+    {
+        const auto chunkSamples = juce::jmin (capacity, requestedSamples - position);
+        auto chunkBlock = block.getSubBlock (position, chunkSamples).getSubsetChannelBlock (0, numChannels);
+
+        processChunk (chunkBlock);
+
+        position += chunkSamples;
+    }
+}
+
+void TriptychEngine::processChunk (juce::dsp::AudioBlock<float> workingBlock)
+{
+    const auto numSamples = workingBlock.getNumSamples();
+    const auto numChannels = workingBlock.getNumChannels();
 
     // Coefficient recomputation involves trig calls, so split frequencies
     // are smoothed and re-derived once per block rather than per sample -

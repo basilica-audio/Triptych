@@ -203,8 +203,11 @@ TEST_CASE ("Block larger than prepareToPlay's declared size is handled defensive
     setAllBandParams (processor, -18.0f, 4.0f, 10.0f, 100.0f, 0.0f);
 
     // Deliberately larger than the 128 declared to prepareToPlay - exercises
-    // TriptychEngine::process()'s defensive clamp to the per-band buffer
-    // capacity established in prepare().
+    // TriptychEngine::process()'s internal chunking of an oversized block
+    // into <= prepared-capacity pieces (see EngineTests.cpp's dedicated
+    // "fully processed, not dry-passthrough past the boundary" test for the
+    // stronger property that every sample - not just the first 128 - is
+    // actually run through the chain).
     juce::AudioBuffer<float> buffer (2, 4096);
     TestHelpers::fillWithSine (buffer, 48000.0, 1000.0, 0.7f);
 

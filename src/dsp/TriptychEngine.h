@@ -48,8 +48,9 @@ public:
 
     // Processes `block` in place. Real-time safe: no allocation once
     // prepare() has completed. A zero-sample block is a safe no-op; a block
-    // larger than what prepare() was sized for is defensively trimmed to
-    // the prepared capacity rather than causing an out-of-bounds write.
+    // larger than what prepare() was sized for is chunked internally into
+    // <= prepared-capacity pieces (each run through the full signal chain in
+    // turn) rather than leaving the excess samples unprocessed.
     void process (juce::dsp::AudioBlock<float>& block);
 
     // Crossover split frequencies, in Hz. Real-time safe - smoothed and
@@ -104,6 +105,12 @@ public:
     static constexpr int getLatencySamples() noexcept { return 0; }
 
 private:
+    // Processes a single chunk of at most the prepared per-band buffer
+    // capacity - the full signal chain (crossovers, band compressors,
+    // Mute/Solo gate, output trim) for one call. process() above splits any
+    // larger host-supplied block into a sequence of these.
+    void processChunk (juce::dsp::AudioBlock<float> workingBlock);
+
     static constexpr double smoothingTimeSeconds = 0.05;
 
     // Minimum separation enforced between the two split frequencies so the

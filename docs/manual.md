@@ -10,7 +10,7 @@ Triptych is a 3-band multiband compressor built on JUCE 8. It splits the signal 
 
 Unlike a single-band compressor, Triptych lets you control dynamics differently per register: squeeze the low end tight without touching cymbal transients, tame a harsh pick-attack band without softening the low-end punch, or duck sibilance in the highs while the low end stays untouched.
 
-## Where it sits in a symphonic-metal chain
+## Where it sits in a heavy production chain
 
 Triptych is a **mastering/mix-bus dynamics tool**, not a per-instrument effect. A typical use:
 

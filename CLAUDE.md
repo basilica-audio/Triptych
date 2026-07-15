@@ -1,6 +1,6 @@
 # Triptych — 3-band multiband compressor (mastering)
 
-Per-repo working memory for Claude Code sessions on this plugin. Part of the **Metal up your ass** symphonic-metal plugin suite (`github.com/basilica-audio`).
+Per-repo working memory for Claude Code sessions on this plugin. Part of the **Basilica Audio** plugin suite — sacred-architecture DSP for heavy music (`github.com/basilica-audio`).
 
 ## What this is
 Triptych is the "3-band multiband compressor (mastering)" member of the suite. AU / VST3 / Standalone, JUCE 8.

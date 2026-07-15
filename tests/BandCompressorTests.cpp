@@ -4,6 +4,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <memory>
+
 namespace
 {
     constexpr double testSampleRate = 48000.0;
@@ -114,6 +116,139 @@ TEST_CASE ("BandCompressor: a signal above threshold receives measurable gain re
     // ripple/settling behaviour is not the property under test here.
     CHECK (gainReductionDb < -6.0);
     CHECK (TestHelpers::allSamplesFinite (processed));
+}
+
+TEST_CASE ("BandCompressor: limiter ballistics track input while disabled, not frozen (issue #12)", "[dsp][compressor][limiter][regression]")
+{
+    // Regression coverage for issue #12: the previous implementation toggled
+    // juce::dsp::Limiter's own context.isBypassed flag while "disabled",
+    // which (JUCE 8.0.14, juce_dsp/widgets/juce_Limiter.h:79-83, which each
+    // of its two internal Compressors also does per juce_Compressor.h:85-89)
+    // short-circuits to a plain copyFrom() as the *first* statement -
+    // skipping the BallisticsFilter envelope update entirely. So the
+    // limiter's internal gain-reduction state was frozen at whatever it was
+    // the instant limiterEnabled flipped to false, contradicting the
+    // documented "keeps its internal ballistics continuous... no pop on
+    // re-enable" guarantee (BandCompressor.h, docs/architecture.md).
+    //
+    // This proves the property directly by comparing two instances fed the
+    // identical audio sequence (loud -> quiet -> loud again):
+    //  - "reference": limiter enabled throughout - the continuously-tracked
+    //    ground truth. Its envelope decays during the quiet passage (like
+    //    any real, still-flowing signal would) and has to re-attack when
+    //    the loud tone resumes, producing a genuine, measurable overshoot
+    //    right after the loud tone returns (the fast-but-not-instant attack
+    //    stage of the two cascaded internal Compressors catching up).
+    //  - "toggled": limiter disabled for the exact same quiet passage, then
+    //    re-enabled when the loud tone resumes - the scenario from the
+    //    issue title.
+    // With a continuously-tracked envelope (the fix), both instances run
+    // through byte-for-byte identical processing at every point in time
+    // (whether or not the limiter is spliced into the output is orthogonal
+    // to whether it *runs*), so toggled's output should match reference's
+    // sample-for-sample once re-enabled. With the old frozen-envelope
+    // behaviour, toggled resumes already at the hot, fully-attenuating
+    // state from before the quiet passage, so its immediate post-re-enable
+    // samples diverge sharply from reference's genuine re-attack transient
+    // before both eventually reach the same steady state - a divergence a
+    // block-aggregate peak can miss (both instances' steady state is
+    // dominated by juce::dsp::Limiter's own unconditional +-1.0 hard clip),
+    // so this measures the largest per-sample difference between the two
+    // instead.
+    constexpr double sampleRate = 48000.0;
+    constexpr int blockSize = 64;
+    constexpr double toneHz = 1000.0;
+
+    constexpr int loudBlocks = 100; // ~133 ms: let the envelope settle hot
+    constexpr int quietBlocks = 400; // ~533 ms: far more than the limiter's 2 ms/50 ms attack/release times, so a continuously-tracked envelope fully decays
+    constexpr int measureBlocks = 4; // ~5.3 ms right after re-enable: the attack-transient window
+
+    auto makeBand = []
+    {
+        auto band = std::make_unique<BandCompressor>();
+        band->setThresholdDb (-24.0f);
+        band->setRatio (1.0f); // VCA stage bypassed - isolates the limiter's own behaviour
+        band->setAttackMs (1.0f);
+        band->setReleaseMs (50.0f);
+        band->setMakeupDb (6.0f); // over the limiter threshold, but not so hot that both instances immediately saturate at the hard clip regardless of envelope state
+        band->setLimiterThresholdDb (-3.0f);
+
+        juce::dsp::ProcessSpec spec;
+        spec.sampleRate = sampleRate;
+        spec.maximumBlockSize = static_cast<juce::uint32> (blockSize);
+        spec.numChannels = 1;
+        band->prepare (spec);
+        return band;
+    };
+
+    auto reference = makeBand();
+    reference->setLimiterEnabled (true);
+
+    auto toggled = makeBand();
+    toggled->setLimiterEnabled (true);
+
+    juce::int64 samplePosition = 0;
+    float maxAbsoluteDifference = 0.0f;
+    float referencePeakDuringMeasurement = 0.0f;
+
+    auto runBlocks = [&] (int numBlocks, bool referenceEnabled, bool toggledEnabled, float amplitude, bool measure)
+    {
+        for (int b = 0; b < numBlocks; ++b)
+        {
+            reference->setLimiterEnabled (referenceEnabled);
+            toggled->setLimiterEnabled (toggledEnabled);
+
+            juce::AudioBuffer<float> referenceBuffer (1, blockSize);
+            TestHelpers::fillWithSine (referenceBuffer, sampleRate, toneHz, amplitude, samplePosition);
+            juce::AudioBuffer<float> toggledBuffer;
+            toggledBuffer.makeCopyOf (referenceBuffer);
+
+            juce::dsp::AudioBlock<float> referenceBlock (referenceBuffer);
+            juce::dsp::AudioBlock<float> toggledBlock (toggledBuffer);
+            reference->process (referenceBlock);
+            toggled->process (toggledBlock);
+
+            if (measure)
+            {
+                referencePeakDuringMeasurement = std::max (referencePeakDuringMeasurement, TestHelpers::peakAbsolute (referenceBuffer));
+
+                const auto* referenceData = referenceBuffer.getReadPointer (0);
+                const auto* toggledData = toggledBuffer.getReadPointer (0);
+
+                for (int i = 0; i < blockSize; ++i)
+                    maxAbsoluteDifference = std::max (maxAbsoluteDifference, std::abs (referenceData[i] - toggledData[i]));
+            }
+
+            samplePosition += blockSize;
+        }
+    };
+
+    // Phase 1: both enabled, loud tone - let the envelope settle hot.
+    runBlocks (loudBlocks, true, true, 0.9f, false);
+
+    // Phase 2: quiet passage. Reference keeps its limiter engaged throughout
+    // (the "always continuously tracking" ground truth); toggled disables
+    // its limiter for the same quiet passage - the exact "disable while
+    // signal changes" scenario from issue #12.
+    runBlocks (quietBlocks, true, false, 0.0f, false);
+
+    // Phase 3: loud tone resumes and toggled's limiter is re-enabled.
+    // Measure the first few ms after re-enable - the attack-transient
+    // window where a frozen vs. continuously-tracked envelope diverge.
+    runBlocks (measureBlocks, true, true, 0.9f, true);
+
+    // Sanity: the scenario genuinely exercises a re-attack transient (the
+    // reference reaches a non-trivial level once the loud tone resumes)
+    // rather than being trivially flat/degenerate.
+    CHECK (referencePeakDuringMeasurement > 0.3f);
+
+    // The property under test: a continuously-tracked limiter's re-enable
+    // behaviour should match one that was never disabled sample-for-sample,
+    // because both ran identical processing throughout - including during
+    // the disabled window, where the old, frozen-envelope implementation
+    // instead produced a measurably different (already fully-attenuated)
+    // trajectory.
+    CHECK (maxAbsoluteDifference < 0.05f);
 }
 
 TEST_CASE ("BandCompressor: reset() clears envelope/gain-ramp state without crashing", "[dsp][compressor]")

@@ -9,6 +9,8 @@ void BandCompressor::prepare (const juce::dsp::ProcessSpec& spec)
 
     limiter.prepare (spec);
 
+    limiterScratchBuffer.setSize (static_cast<int> (spec.numChannels), static_cast<int> (spec.maximumBlockSize));
+
     thresholdSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
     thresholdSmoothed.setCurrentAndTargetValue (lastThresholdDb);
     ratioSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
@@ -84,10 +86,30 @@ void BandCompressor::process (juce::dsp::AudioBlock<float>& block) noexcept
     compressor.process (context);
     makeupGain.process (context);
 
-    // The optional limiter stage always runs so its internal ballistics
-    // state stays continuous while toggled on/off (no pop on enable); when
-    // disabled it just copies the block through (see setLimiterEnabled's
-    // doc comment in BandCompressor.h).
-    context.isBypassed = ! limiterEnabled;
-    limiter.process (context);
+    // The optional limiter stage always runs, unconditionally (never
+    // context.isBypassed), against a scratch copy of the signal so its
+    // internal ballistics genuinely stay continuous whether or not it is
+    // currently switched into the output - see setLimiterEnabled's doc
+    // comment in BandCompressor.h for why toggling juce::dsp::Limiter's own
+    // isBypassed flag (the previous approach) does not achieve that.
+    const auto numChannels = juce::jmin (block.getNumChannels(), static_cast<size_t> (limiterScratchBuffer.getNumChannels()));
+    const auto scratchSamples = juce::jmin (numSamples, static_cast<size_t> (limiterScratchBuffer.getNumSamples()));
+
+    if (numChannels == 0 || scratchSamples == 0)
+        return;
+
+    auto scratchBlock = juce::dsp::AudioBlock<float> (limiterScratchBuffer)
+                             .getSubBlock (0, scratchSamples)
+                             .getSubsetChannelBlock (0, numChannels);
+    scratchBlock.copyFrom (block.getSubBlock (0, scratchSamples).getSubsetChannelBlock (0, numChannels));
+
+    juce::dsp::ProcessContextReplacing<float> limiterContext (scratchBlock);
+    limiter.process (limiterContext);
+
+    // Only splice the limited result back into the real output when the
+    // limiter is actually enabled; while disabled the band's output stays
+    // exactly the unlimited compressor+makeup signal, even though the
+    // limiter kept processing "in the background" above.
+    if (limiterEnabled)
+        block.getSubBlock (0, scratchSamples).getSubsetChannelBlock (0, numChannels).copyFrom (scratchBlock);
 }

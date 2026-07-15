@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BandCompressor**: the High-band limiter's documented "no pop on re-enable" guarantee was broken - toggling `juce::dsp::Limiter`'s own `context.isBypassed` flag while disabled actually froze its internal ballistics (JUCE 8.0.14's `Limiter`/`Compressor::process()` skip the envelope-filter update entirely when bypassed) instead of keeping them continuous, so re-enabling could resume gain reduction from a stale, pre-disable envelope state rather than one consistent with the current input. The limiter now always runs at full strength into a preallocated scratch buffer, splicing the limited result back into the output only when enabled (#12).
 - **TriptychEngine**: a host-supplied block larger than the capacity established in `prepareToPlay()` left the excess samples as unprocessed dry passthrough (bypassing every processing stage, including the master Output trim) instead of erroring or being fully processed. `process()` now chunks any oversized block into `<=`-capacity pieces, each run through the full signal chain (#14).
+- **TriptychEngine**: per-band Mute/Solo resolved to a bare block-rate 0.0f/1.0f gain multiplier, producing an audible click on toggle mid-playback from the hard step discontinuity at the block boundary. The resolved gain is now smoothed via `juce::SmoothedValue` (#13).
 
 ## [0.1.0] - 2026-07-14
 

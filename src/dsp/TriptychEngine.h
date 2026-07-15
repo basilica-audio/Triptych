@@ -86,10 +86,11 @@ public:
     void setHighLimiterThresholdDb (float newThresholdDb) { highBand.setLimiterThresholdDb (newThresholdDb); }
 
     // Per-band Mute/Solo (M1), applied at the summing stage below - see
-    // ParameterIds.h for the console-style semantics. Plain bools (not
-    // smoothed): a Mute/Solo toggle is a discrete mix decision, not an
-    // audio-rate gain value, matching how juce::dsp::Compressor's own
-    // Attack/Release setters are applied directly elsewhere in this engine.
+    // ParameterIds.h for the console-style semantics. The booleans
+    // themselves are set directly (a Mute/Solo toggle is a discrete mix
+    // decision, not an audio-rate value), but the *gain* they resolve to is
+    // smoothed (see lowGainSmoothed et al.) so the toggle itself never
+    // produces an audible click (issue #13).
     void setLowMute (bool shouldBeMuted) noexcept { lowMuted = shouldBeMuted; }
     void setLowSolo (bool shouldBeSoloed) noexcept { lowSoloed = shouldBeSoloed; }
     void setMidMute (bool shouldBeMuted) noexcept { midMuted = shouldBeMuted; }
@@ -156,6 +157,26 @@ private:
     bool midSoloed = false;
     bool highMuted = false;
     bool highSoloed = false;
+
+    // Per-band Mute/Solo gain, smoothed rather than a bare per-block 0/1
+    // constant (issue #13): resolving Mute/Solo to a plain 0.0f/1.0f
+    // multiplier applied uniformly across a whole block introduces a hard
+    // step discontinuity at whatever sample happens to fall on the block
+    // boundary when the state actually changes mid-playback - audible as a
+    // click, independent of (and in addition to) each band's own
+    // compressor/limiter envelopes staying continuous underneath. Ramped
+    // the same way every other real-time-varying scalar in this engine is
+    // (see thresholdSmoothed/ratioSmoothed in BandCompressor, and the split
+    // frequency smoothers below).
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> lowGainSmoothed;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> midGainSmoothed;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> highGainSmoothed;
+
+    // Per-sample Mute/Solo gain ramps, filled once per processChunk() call
+    // from the smoothers above and consumed by the summing loop - 3 mono
+    // channels (Low/Mid/High), sized to the maximum chunk capacity in
+    // prepare() and never reallocated on the audio thread.
+    juce::AudioBuffer<float> muteSoloGainBuffer;
 
     double sampleRate = 44100.0;
 

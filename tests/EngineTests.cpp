@@ -249,6 +249,78 @@ TEST_CASE ("Engine reset() clears crossover/compressor/gain state without crashi
     CHECK (TestHelpers::allSamplesFinite (buffer));
 }
 
+TEST_CASE ("Engine: a block larger than prepared capacity is fully processed, not dry-passthrough past the boundary (issue #14)", "[dsp][engine][robustness][regression]")
+{
+    // Regression coverage for issue #14: TriptychEngine::process() used to
+    // clamp numSamples to the per-band buffer capacity established in
+    // prepare() and only ever touch that first `capacity`-sized region of
+    // the host's buffer - samples at [capacity, requestedSamples) were never
+    // read or written at all, silently passing the host's raw dry input
+    // through untouched (including bypassing the master Output trim) if a
+    // host ever called process() with more samples than it declared via
+    // prepareToPlay()'s maximumExpectedSamplesPerBlock. This proves the full
+    // requested block is actually run through the chain by driving a large,
+    // clearly audible Output trim and checking it's applied far past the
+    // old clamp boundary, not just within it.
+    TriptychEngine engine;
+    bypassAllBands (engine); // ratio 1:1 + makeup 0 dB on every band - see helper above
+    engine.setOutputDb (-40.0f); // deliberately large and easy to distinguish from "unprocessed" (0 dB)
+
+    constexpr int preparedCapacity = 128;
+    juce::dsp::ProcessSpec spec;
+    spec.sampleRate = testSampleRate;
+    spec.maximumBlockSize = static_cast<juce::uint32> (preparedCapacity);
+    spec.numChannels = 1;
+    engine.prepare (spec);
+
+    // Deliberately much larger than the 128 declared to prepare() - the
+    // exact "block larger than prepared capacity" scenario from the issue
+    // title. A single process() call, matching how PluginProcessor.cpp
+    // hands the engine one juce::dsp::AudioBlock over the whole host buffer
+    // with no chunking loop of its own.
+    constexpr int requestedSamples = 4096;
+    juce::AudioBuffer<float> reference (1, requestedSamples);
+    TestHelpers::fillWithSine (reference, testSampleRate, 1000.0, 0.8f);
+
+    juce::AudioBuffer<float> processed;
+    processed.makeCopyOf (reference);
+
+    juce::dsp::AudioBlock<float> block (processed);
+    engine.process (block);
+
+    CHECK (TestHelpers::allSamplesFinite (processed));
+
+    // Old (buggy) behaviour: only samples [0, 128) got the -40 dB trim;
+    // samples [128, 4096) - the overwhelming majority of this buffer - were
+    // raw dry passthrough at ~0 dB. Measuring a tail region that starts well
+    // past the old 128-sample clamp boundary (and past the crossover's own
+    // brief turn-on transient) makes that unambiguous.
+    constexpr int tailStart = 1000;
+    const auto* refData = reference.getReadPointer (0);
+    const auto* outData = processed.getReadPointer (0);
+
+    double sumOfSquaresInput = 0.0;
+    double sumOfSquaresOutput = 0.0;
+
+    for (int i = tailStart; i < requestedSamples; ++i)
+    {
+        sumOfSquaresInput += static_cast<double> (refData[i]) * static_cast<double> (refData[i]);
+        sumOfSquaresOutput += static_cast<double> (outData[i]) * static_cast<double> (outData[i]);
+    }
+
+    const auto tailInputRms = std::sqrt (sumOfSquaresInput / static_cast<double> (requestedSamples - tailStart));
+    const auto tailOutputRms = std::sqrt (sumOfSquaresOutput / static_cast<double> (requestedSamples - tailStart));
+
+    REQUIRE (tailInputRms > 0.0);
+
+    const auto tailGainDb = juce::Decibels::gainToDecibels (tailOutputRms / tailInputRms);
+
+    // The tail (well past the old 128-sample clamp) must show the same
+    // ~-40 dB Output trim as samples within the old clamp boundary, not the
+    // ~0 dB an unprocessed dry passthrough would show.
+    CHECK (tailGainDb == Catch::Approx (-40.0).margin (1.0));
+}
+
 TEST_CASE ("Engine: zero-sample block is a safe no-op", "[dsp][engine][robustness]")
 {
     TriptychEngine engine;

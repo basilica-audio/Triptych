@@ -160,6 +160,67 @@ TEST_CASE ("Solo: the soloed band's own signal passes through unattenuated", "[d
     CHECK (juce::Decibels::gainToDecibels (outputRms / inputRms) == Catch::Approx (0.0).margin (0.5));
 }
 
+TEST_CASE ("Mute: toggling mid-playback is smoothed, not an instantaneous per-block gain jump (issue #13)", "[dsp][engine][mute][regression]")
+{
+    // Regression coverage for issue #13: TriptychEngine::process() used to
+    // resolve Mute/Solo to a bare 0.0f/1.0f multiplier applied uniformly
+    // across an entire block, so toggling mid-playback produced a hard step
+    // discontinuity at whichever sample happened to land on the block
+    // boundary - audible as a click. This is a distinct failure mode from
+    // envelope continuity (already covered above): even with each band's
+    // compressor/limiter running continuously underneath, the gain *step*
+    // itself was never smoothed.
+    TriptychEngine engine;
+    bypassAllBandsForMuteSoloTest (engine);
+
+    constexpr int blockSize = 64;
+    const auto spec = makeTestSpec (1);
+    engine.prepare (spec);
+
+    juce::int64 samplePosition = 0;
+    float previousLastSample = 0.0f;
+    float maxAbsoluteStepDelta = 0.0f;
+
+    for (int b = 0; b < 20; ++b)
+    {
+        // Toggle Low mute on mid-stream, while a steady tone is flowing -
+        // the exact "click on toggle mid-playback" scenario from the issue
+        // title.
+        if (b == 10)
+            engine.setLowMute (true);
+
+        juce::AudioBuffer<float> buffer (1, blockSize);
+        TestHelpers::fillWithSine (buffer, testSampleRate, 100.0, 0.8f, samplePosition); // well inside the Low band
+
+        juce::dsp::AudioBlock<float> block (buffer);
+        engine.process (block);
+
+        const auto* data = buffer.getReadPointer (0);
+
+        // The delta across the sample pair straddling this block's boundary
+        // with the previous one - exactly where an unsmoothed toggle shows
+        // up (the mute/solo gate is resolved once at the top of each block).
+        if (b > 0)
+            maxAbsoluteStepDelta = std::max (maxAbsoluteStepDelta, std::abs (data[0] - previousLastSample));
+
+        // Also track every intra-block consecutive-sample delta, so the fix
+        // can't just move the discontinuity from sample 0 to sample 1.
+        for (int i = 1; i < blockSize; ++i)
+            maxAbsoluteStepDelta = std::max (maxAbsoluteStepDelta, std::abs (data[i] - data[i - 1]));
+
+        previousLastSample = data[blockSize - 1];
+        samplePosition += blockSize;
+    }
+
+    // A 100 Hz, 0.8-amplitude sine at 48 kHz has a maximum sample-to-sample
+    // delta on the order of 2*pi*100/48000 * 0.8 ~= 0.0105 from the
+    // waveform's own slope alone - nowhere near the ~0.8 (full amplitude)
+    // single-sample jump an unsmoothed Mute toggle produces. This margin
+    // comfortably separates "smoothed ramp" from "hard step" without being
+    // tight enough to fail on the waveform's own natural slope.
+    CHECK (maxAbsoluteStepDelta < 0.05f);
+}
+
 TEST_CASE ("Mute always wins over Solo on the same band", "[dsp][engine][mute][solo]")
 {
     TriptychEngine engine;

@@ -50,11 +50,23 @@ public:
     // the High band currently exposes it via APVTS - see TriptychEngine and
     // ParameterIds.h). Runs after the compressor + makeup gain, so it
     // catches whatever peaks reach the band's output including any makeup
-    // boost. juce::dsp::Limiter::process(context) supports context.isBypassed
-    // as a cheap real-time-safe copy-through (JUCE 8.0.14,
-    // juce_dsp/widgets/juce_Limiter.h - internally two Compressors and a
-    // hard clip at 0 dB, no lookahead/delay line, so this adds zero
-    // latency), so toggling this flag never needs a branch inside process().
+    // boost.
+    //
+    // Real-time-safe by construction, but NOT via juce::dsp::Limiter's own
+    // context.isBypassed: that flag (JUCE 8.0.14, juce_dsp/widgets/
+    // juce_Limiter.h:79-83, which forwards to juce_Compressor.h:85-89 in
+    // both of its internal Compressor stages) short-circuits to a plain
+    // copyFrom() as the *first* statement, skipping the BallisticsFilter
+    // envelope update entirely - so driving it with isBypassed while
+    // "disabled" freezes the limiter's ballistics rather than keeping them
+    // continuous (issue #12). Instead, process() always runs the limiter at
+    // full strength (isBypassed == false, always) against a preallocated
+    // scratch copy of the post-compressor/makeup signal, so its envelope
+    // honestly tracks whatever is actually flowing through the band at all
+    // times; the limited result is only spliced back into the real output
+    // when the limiter is enabled. That is what makes re-enabling resume
+    // gain reduction from a state consistent with the current input rather
+    // than a stale pre-disable snapshot.
     void setLimiterEnabled (bool shouldBeEnabled) noexcept { limiterEnabled = shouldBeEnabled; }
     void setLimiterThresholdDb (float newThresholdDb);
 
@@ -71,6 +83,12 @@ private:
     juce::dsp::Limiter<float> limiter;
     bool limiterEnabled = false;
     float lastLimiterThresholdDb = -3.0f;
+
+    // Scratch copy of the post-compressor/makeup signal that the limiter
+    // always runs against (see setLimiterEnabled's doc comment above), sized
+    // to the prepared capacity in prepare() and never reallocated on the
+    // audio thread.
+    juce::AudioBuffer<float> limiterScratchBuffer;
 
     // Threshold and ratio are smoothed and re-applied once per block - the
     // same block-rate-recompute compromise TriptychEngine/OvertureEngine use

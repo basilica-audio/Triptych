@@ -2,26 +2,45 @@
 
 #include <juce_dsp/juce_dsp.h>
 
-// One compression band: threshold/ratio/attack/release feed-forward VCA
-// compression (juce::dsp::Compressor) followed by a makeup gain trim
-// (juce::dsp::Gain). TriptychEngine owns three of these (Low/Mid/High); kept
-// as its own class so each band's state (envelope filter + makeup gain
-// ramp) is independent and so it is unit-testable in isolation (see
-// tests/BandCompressorTests.cpp) without needing the full 3-band engine and
-// its crossovers.
+// One compression band: threshold/ratio/knee feed-forward VCA compression
+// (a from-scratch gain computer, see src/dsp/KneeGainComputer.h, driven by
+// juce::dsp::BallisticsFilter's peak envelope follower) followed by a
+// makeup gain trim (juce::dsp::Gain). TriptychEngine owns three of these
+// (Low/Mid/High); kept as its own class so each band's state (envelope
+// filter + makeup gain ramp) is independent and so it is unit-testable in
+// isolation (see tests/BandCompressorTests.cpp) without needing the full
+// 3-band engine and its crossovers.
 //
-// juce::dsp::Compressor (JUCE 8.0.14, juce_dsp/widgets/juce_Compressor.h) is
-// a causal ballistics-filter envelope follower with no lookahead, so it adds
-// zero latency - this band, and therefore the whole Triptych engine, is
-// minimum-phase.
+// juce::dsp::BallisticsFilter (JUCE 8.0.14, juce_dsp/processors/
+// juce_BallisticsFilter.h) is a causal envelope follower with no lookahead,
+// so this band - and therefore the whole Triptych engine - stays
+// minimum-phase, exactly as it was when BandCompressor wrapped
+// juce::dsp::Compressor directly in v0.1.
 //
-// Bypass identity: with ratio == 1.0, juce::dsp::Compressor::processSample
-// computes gain = pow(env * thresholdInverse, ratioInverse - 1.0) and
-// ratioInverse - 1.0 == 0 for ratio == 1.0, so gain == 1.0 unconditionally
-// (independent of threshold/envelope) - i.e. ratio 1:1 is an exact,
-// bit-identical bypass of the VCA stage. Combined with makeup == 0 dB (unity
-// Gain), setRatio(1.0f) + setMakeupDb(0.0f) makes a band a true identity
-// pass-through. This is what TriptychEngine's flat-sum null test relies on.
+// v0.2.0 (docs/design-brief.md): v0.1 wrapped juce::dsp::Compressor, whose
+// own gain formula (`gain = pow(env * thresholdInverse, ratioInverse - 1.0)`
+// for `env >= threshold`, else `1.0`) is a hard knee with zero transition
+// width - no knee parameter existed anywhere in v0.1. This class now owns
+// its own knee-aware gain computer (src/dsp/KneeGainComputer.h) driven
+// directly off a juce::dsp::BallisticsFilter (the same envelope-follower
+// class juce::dsp::Compressor used internally), so a soft, threshold-relative
+// knee (the reference-class-standard behaviour documented in
+// docs/research-notes.md) can be layered in without changing the envelope
+// follower's own behaviour at all.
+//
+// Bypass identity: with ratio == 1.0, KneeGainComputer::computeGainLinear()
+// returns 1.0 unconditionally (independent of threshold/envelope/knee) - see
+// KneeGainComputer.h/.cpp. Combined with makeup == 0 dB (unity Gain),
+// setRatio(1.0f) + setMakeupDb(0.0f) makes a band a true identity
+// pass-through regardless of Knee, which is what TriptychEngine's flat-sum
+// null test relies on (tests/EngineTests.cpp).
+//
+// Knee null test (docs/design-brief.md guarantee #1): at Knee == 0%,
+// KneeGainComputer::computeGainLinear() takes a dedicated linear-domain fast
+// path that reproduces juce::dsp::Compressor::processSample()'s exact
+// hard-knee formula bit-for-bit (see KneeGainComputer.h/.cpp) - the v0.1
+// bypass-identity and gain-reduction tests are preserved unchanged at that
+// extreme (tests/BandCompressorTests.cpp).
 class BandCompressor
 {
 public:
@@ -41,6 +60,7 @@ public:
 
     void setThresholdDb (float newThresholdDb);
     void setRatio (float newRatio);
+    void setKneePercent (float newKneePercent);
     void setAttackMs (float newAttackMs);
     void setReleaseMs (float newReleaseMs);
     void setMakeupDb (float newMakeupDb);
@@ -78,7 +98,12 @@ private:
     // brickwall catch" role the High-band limiter option is meant to play.
     static constexpr float limiterReleaseMs = 50.0f;
 
-    juce::dsp::Compressor<float> compressor;
+    // v0.2.0's own knee-aware VCA gain computer, replacing v0.1's
+    // juce::dsp::Compressor - see the class-level doc comment above and
+    // src/dsp/KneeGainComputer.h. Uses the exact same peak-detection
+    // envelope-follower class juce::dsp::Compressor used internally, so
+    // attack/release behaviour is unchanged from v0.1.
+    juce::dsp::BallisticsFilter<float> envelopeFilter;
     juce::dsp::Gain<float> makeupGain;
     juce::dsp::Limiter<float> limiter;
     bool limiterEnabled = false;
@@ -90,24 +115,32 @@ private:
     // audio thread.
     juce::AudioBuffer<float> limiterScratchBuffer;
 
-    // Threshold and ratio are smoothed and re-applied once per block - the
-    // same block-rate-recompute compromise TriptychEngine/OvertureEngine use
-    // for filter cutoffs: juce::dsp::Compressor has no ramp of its own for
-    // these, so an unsmoothed jump (e.g. a fast GUI drag) would otherwise
-    // produce an audible, instantaneous step in the VCA gain curve. Attack
-    // and Release are the envelope follower's own time constants rather than
-    // audio-rate gain values, so applying them unsmoothed (as
-    // juce::dsp::Compressor's own setAttack/setRelease do synchronously) is
-    // standard practice and matches JUCE's own design.
+    // Threshold, ratio, and knee are smoothed and re-applied once per block -
+    // the same block-rate-recompute compromise TriptychEngine/OvertureEngine
+    // use for filter cutoffs: the knee-aware gain computer has no ramp of
+    // its own for these, so an unsmoothed jump (e.g. a fast GUI drag) would
+    // otherwise produce an audible, instantaneous step in the VCA gain
+    // curve. Attack and Release are the envelope follower's own time
+    // constants rather than audio-rate gain values, so applying them
+    // unsmoothed (as juce::dsp::BallisticsFilter's own setAttackTime/
+    // setReleaseTime do synchronously) is standard practice and matches
+    // juce::dsp::Compressor's own v0.1 design.
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> thresholdSmoothed;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> ratioSmoothed;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> kneeSmoothed;
 
     // Last commanded values (ParameterLayout defaults until a setter is
     // called), re-applied to the smoothers on every prepare() so re-prepare
     // (sample-rate change, etc.) never resets a live parameter back to a
-    // default or lets ratio ramp from an invalid < 1.0 starting point.
+    // default or lets ratio ramp from an invalid < 1.0 starting point. The
+    // per-band defaults below match this class's own hard-coded fallback
+    // only until BandCompressor's owner (TriptychEngine/PluginProcessor)
+    // calls the real setters with the actual per-band ParameterLayout
+    // defaults (docs/design-brief.md) - see ParameterLayout.cpp for the
+    // authoritative values.
     float lastThresholdDb = -18.0f;
     float lastRatio = 4.0f;
+    float lastKneePercent = 50.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BandCompressor)
 };

@@ -12,22 +12,25 @@
 <!-- ==BEGIN BODY== (plugin engineer: replace this block with What it is / Features / Signal flow / Roadmap) -->
 ## What it is
 
-Triptych is a 3-band multiband compressor built on JUCE 8, aimed at taming dense, heavy mixes: two cascaded 4th-order Linkwitz-Riley (LR4) crossovers split the signal into Low/Mid/High bands, each with its own independent threshold/ratio/attack/release/makeup compressor and Mute/Solo, before the three bands are gated and summed back together and trimmed by a master output stage. The High band can additionally engage a brickwall-style limiter. The LR4 crossover's defining property - a magnitude-flat low+high sum - means that with every band's compressor disabled, Triptych is an exact, bit-identical passthrough of the input. See [`docs/manual.md`](docs/manual.md) for the full user manual.
+Triptych is a 3-band multiband compressor built on JUCE 8, aimed at taming dense, heavy mixes: two cascaded 4th-order Linkwitz-Riley (LR4) crossovers split the signal into Low/Mid/High bands, each with its own independent threshold/ratio/knee/attack/release/makeup compressor and Mute/Solo, before the three bands are gated and summed back together and trimmed by a master output stage. The High band can additionally engage a brickwall-style limiter. The LR4 crossover's defining property - a magnitude-flat low+high sum - means that with every band's compressor disabled, Triptych is an exact, bit-identical passthrough of the input. See [`docs/manual.md`](docs/manual.md) for the full user manual.
 
-## Features (v0.1.0 scope)
+## Features (v0.2.0 scope)
 
 - **Low/Mid Split** and **Mid/High Split** - crossover points, 40 Hz - 1 kHz and 400 Hz - 12 kHz respectively, with a minimum runtime separation so automation can never invert band order
 - **Per-band compression** (Low/Mid/High), each with:
-  - **Threshold** - -60 to 0 dB
-  - **Ratio** - 1:1 (bypass) to 20:1
-  - **Attack** - 0.1 - 100 ms
-  - **Release** - 10 - 1000 ms
+  - **Threshold** - -60 to 0 dB (per-band defaults: Low -24, Mid -30, High -20)
+  - **Ratio** - 1:1 (bypass) to 20:1 (per-band defaults: Low 2.5:1, Mid 1.8:1, High 2:1)
+  - **Knee** *(new in v0.2.0)* - 0-100%, default 50%, threshold-relative soft-knee transition (0% is v0.1's exact hard knee)
+  - **Attack** - 0.1 - 100 ms (per-band defaults: Low 25, Mid 10, High 5)
+  - **Release** - 10 - 1000 ms (per-band defaults: Low 180, Mid 100, High 55)
   - **Makeup** - -12 to +24 dB
 - **Per-band Mute/Solo** (Low/Mid/High) - console-style semantics: Mute always wins, soloing isolates the soloed band(s) while their compressor keeps running underneath (no re-attack pop on unmute)
 - **High-band limiter option** - an optional brickwall-style `juce::dsp::Limiter` stage after the High band's compressor, threshold -24 to 0 dB (default -3 dB), guaranteeing the High band never exceeds 0 dBFS once engaged
 - **Output** - master trim after the three (gated) bands are summed, -24 to +24 dB
-- **Zero added latency** - the LR4 crossovers, `juce::dsp::Compressor`'s envelope follower, and the optional High-band limiter are all minimum-phase/causal with no lookahead, so no dry-path delay compensation is needed anywhere in the plugin
-- Full state save/recall via `AudioProcessorValueTreeState`
+- **Zero added latency** - the LR4 crossovers, the envelope follower driving the per-band gain computer, and the optional High-band limiter are all minimum-phase/causal with no lookahead, so no dry-path delay compensation is needed anywhere in the plugin
+- **Eight factory presets** plus a full preset system (save/load, import/export, banks, default) - see [`docs/presets.md`](docs/presets.md)
+- German localisation of the preset bar's interface text
+- Full state save/recall via `AudioProcessorValueTreeState`, tolerant of pre-v0.2.0 saved sessions
 
 ## Signal flow
 
@@ -47,7 +50,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the full breakdown, inclu
 |---|---|---|
 | M0 | Bootstrap - project skeleton, CI, docs | Done |
 | M1 | DSP completion & test coverage - per-band Mute/Solo, High-band limiter, broadened Catch2 suite | Done (external sidechain and adjustable crossover slopes deliberately deferred - see [`docs/architecture.md`](docs/architecture.md#deferred-from-m1-external-sidechain-and-adjustable-crossover-slopes)) |
-| M2 | Presets & state recall | Planned |
+| M2 | Presets & state recall - research-derived deep-dive rework (soft knee, per-band defaults), eight factory presets, German i18n frame | Done (per-band M/S, RMS detector mode, and program-dependent release deliberately deferred - see [`docs/architecture.md`](docs/architecture.md#deferred-from-v020-ms-processing-rms-detector-mode-program-dependent-release)) |
 | M3 | Custom GUI & accessibility | Planned |
 | M4 | Release engineering - signing, notarization, installers, v1.0.0 | Planned |
 <!-- ==END BODY== -->

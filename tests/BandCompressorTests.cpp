@@ -22,14 +22,58 @@ namespace
     }
 }
 
-TEST_CASE ("BandCompressor: ratio 1:1 + makeup 0 dB is an exact bypass", "[dsp][compressor][null]")
+TEST_CASE ("BandCompressor: ratio 1:1 + makeup 0 dB is an exact bypass regardless of Knee", "[dsp][compressor][null]")
 {
     // Threshold is deliberately set well inside the signal's level, so a
     // true bypass test has to prove the VCA gain is unconditionally 1.0
     // (see BandCompressor.h) rather than just "quiet enough to not matter".
+    // Sweeps Knee across its full range - design-brief.md guarantee #3:
+    // "assert knee has zero audible effect when ratio == 1:1".
+    for (const auto kneePercent : { 0.0f, 50.0f, 100.0f })
+    {
+        CAPTURE (kneePercent);
+
+        BandCompressor band;
+        band.setThresholdDb (-40.0f);
+        band.setRatio (1.0f);
+        band.setKneePercent (kneePercent);
+        band.setAttackMs (1.0f);
+        band.setReleaseMs (50.0f);
+        band.setMakeupDb (0.0f);
+
+        const auto spec = makeTestSpec (2);
+        band.prepare (spec);
+
+        juce::AudioBuffer<float> reference (2, testBlockSize);
+        TestHelpers::fillWithSine (reference, testSampleRate, testFrequencyHz, 0.9f);
+
+        juce::AudioBuffer<float> processed;
+        processed.makeCopyOf (reference);
+
+        juce::dsp::AudioBlock<float> block (processed);
+        band.process (block);
+
+        for (int channel = 0; channel < reference.getNumChannels(); ++channel)
+        {
+            const auto* refData = reference.getReadPointer (channel);
+            const auto* outData = processed.getReadPointer (channel);
+
+            for (int i = 0; i < testBlockSize; ++i)
+                CHECK (outData[i] == Catch::Approx (refData[i]).margin (1e-6));
+        }
+    }
+}
+
+TEST_CASE ("BandCompressor: Knee null test - Knee 0% reproduces v0.1's exact hard-knee bypass identity bit-for-bit (design-brief.md guarantee #1)", "[dsp][compressor][null][regression]")
+{
+    // Regression coverage: v0.1's bypass-identity test, unchanged, with Knee
+    // explicitly pinned to 0% (v0.1's only possible behaviour before this
+    // parameter existed) rather than the new v0.2.0 default (50%) - see the
+    // sibling test above for the "any Knee value" version of this property.
     BandCompressor band;
     band.setThresholdDb (-40.0f);
     band.setRatio (1.0f);
+    band.setKneePercent (0.0f);
     band.setAttackMs (1.0f);
     band.setReleaseMs (50.0f);
     band.setMakeupDb (0.0f);
@@ -56,11 +100,14 @@ TEST_CASE ("BandCompressor: ratio 1:1 + makeup 0 dB is an exact bypass", "[dsp][
     }
 }
 
-TEST_CASE ("BandCompressor: a signal above threshold receives measurable gain reduction", "[dsp][compressor]")
+TEST_CASE ("BandCompressor: a signal above threshold receives measurable gain reduction (Knee 0%, v0.1 regression)", "[dsp][compressor][regression]")
 {
+    // Knee pinned to 0% so this reproduces v0.1's exact hard-knee GR
+    // measurement (see the Knee-sweep test below for the v0.2.0 default).
     BandCompressor band;
     band.setThresholdDb (-24.0f);
     band.setRatio (8.0f);
+    band.setKneePercent (0.0f);
     band.setAttackMs (0.5f);
     band.setReleaseMs (50.0f);
     band.setMakeupDb (0.0f);
@@ -116,6 +163,71 @@ TEST_CASE ("BandCompressor: a signal above threshold receives measurable gain re
     // ripple/settling behaviour is not the property under test here.
     CHECK (gainReductionDb < -6.0);
     CHECK (TestHelpers::allSamplesFinite (processed));
+}
+
+TEST_CASE ("BandCompressor: a signal above threshold still receives measurable gain reduction at Knee 50%/100%", "[dsp][compressor]")
+{
+    // Same scenario as the Knee-0% regression test above, but sweeping
+    // Knee up to the new v0.2.0 default and its maximum - a steady loud
+    // tone well above threshold + half-knee-width should settle into
+    // essentially the same full-ratio gain reduction regardless of Knee
+    // (only the *transition* into compression differs - see
+    // KneeGainComputerTests.cpp for that shape assertion).
+    for (const auto kneePercent : { 50.0f, 100.0f })
+    {
+        CAPTURE (kneePercent);
+
+        BandCompressor band;
+        band.setThresholdDb (-24.0f);
+        band.setRatio (8.0f);
+        band.setKneePercent (kneePercent);
+        band.setAttackMs (0.5f);
+        band.setReleaseMs (50.0f);
+        band.setMakeupDb (0.0f);
+
+        const auto spec = makeTestSpec (2);
+        band.prepare (spec);
+
+        juce::AudioBuffer<float> reference (2, testBlockSize);
+        TestHelpers::fillWithSine (reference, testSampleRate, testFrequencyHz, 0.7f);
+
+        juce::AudioBuffer<float> processed;
+        processed.makeCopyOf (reference);
+
+        juce::dsp::AudioBlock<float> block (processed);
+        band.process (block);
+
+        constexpr int settleSamples = testBlockSize / 2;
+
+        const auto tailRms = [] (const juce::AudioBuffer<float>& buffer)
+        {
+            double sumOfSquares = 0.0;
+            int counted = 0;
+
+            for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+            {
+                const auto* data = buffer.getReadPointer (channel);
+
+                for (int i = settleSamples; i < buffer.getNumSamples(); ++i)
+                {
+                    sumOfSquares += static_cast<double> (data[i]) * static_cast<double> (data[i]);
+                    ++counted;
+                }
+            }
+
+            return counted > 0 ? std::sqrt (sumOfSquares / static_cast<double> (counted)) : 0.0;
+        };
+
+        const auto inputRms = tailRms (reference);
+        const auto outputRms = tailRms (processed);
+
+        REQUIRE (inputRms > 0.0);
+
+        const auto gainReductionDb = juce::Decibels::gainToDecibels (outputRms / inputRms);
+
+        CHECK (gainReductionDb < -6.0);
+        CHECK (TestHelpers::allSamplesFinite (processed));
+    }
 }
 
 TEST_CASE ("BandCompressor: limiter ballistics track input while disabled, not frozen (issue #12)", "[dsp][compressor][limiter][regression]")

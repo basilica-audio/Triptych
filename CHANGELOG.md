@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-16
+
+### Added
+
+- **Soft knee** (`Knee`, new per-band parameter, 0-100%, default 50%): v0.1 wrapped `juce::dsp::Compressor` directly, whose gain formula is a hard knee with zero transition width - no knee parameter existed at all. v0.2.0 replaces that wrapper with a from-scratch, knee-aware gain computer (`src/dsp/KneeGainComputer.{h,cpp}`) driven by the same `juce::dsp::BallisticsFilter` envelope follower, using the standard quadratic soft-knee interpolation (Giannoulis/Massberg/Reiss, JAES 2012) with the knee's extent scaled threshold-relatively (0% = v0.1's exact hard knee, bit-for-bit preserved as a regression guarantee; 100% = the Weiss DS1-MK3 manual's documented "0 to twice the threshold value" span). See `docs/design-brief.md` and `docs/research-notes.md`.
+- **Research-derived per-band default recalibration**: v0.1 gave Low/Mid/High one identical, uniform default (threshold -18 dB, ratio 4:1, attack 10 ms, release 100 ms). Research into the mastering multiband-compressor reference class (Weiss DS1-MK3, FabFilter Pro-MB, Sound on Sound's "Multi-band Compression" technique article) documented two opposite mastering philosophies (peak control vs. density/knit-together) and band-position-dependent ballistics that v0.1's uniform default matched neither of. New defaults: Low -24 dB/2.5:1/25 ms/180 ms, Mid -30 dB/1.8:1/10 ms/100 ms (the v0.1 anchor), High -20 dB/2:1/5 ms/55 ms - implementing the documented bass≈2×mid/high≈0.5×mid release ratio and slower-bass/faster-high attack ballistics as a standing invariant, not just one-time values. **This voicing is research-derived, sourced from published manuals and technique articles, not measured against reference hardware** - see `docs/research-notes.md`'s confidence notes.
+- **M2 preset system** (`src/presets/`, copied from the `basilica-audio/nave` pilot implementation - `.scaffold/specs/preset-system-m2.md`): a `PresetBar` strip at the top of the editor (`[<] [PresetName*] [>] [Save] [Save As...] [Delete] [Import...] [Export...]`) backed by `PresetManager` - factory presets (embedded via BinaryData), user presets (`~/Library/Audio/Presets/Yves Vogl/Triptych/` on macOS, `%APPDATA%\Yves Vogl\Triptych\Presets\` on Windows), a settable default, single-file and zip-bank import/export, and dirty-state tracking.
+- **Eight factory presets** (`presets/factory/*.json`, see `docs/presets.md`): Default, Density Glue, Peak Control, Low-End Tighten, De-Harsh Highs, Mastering Safety Ceiling, Parallel-Style Density, and Hard Limiter Ceiling - covering both the peak-control and density mastering philosophies plus single-band-focused workflows.
+- **German localisation** of the M2 preset bar's frame strings (`resources/i18n/de.txt`), selected automatically for `de*` system languages. Parameter names, units, and other DSP terminology are never translated, matching the rest of the suite.
+- Editor: a `Knee` knob added to every band's control column, and the preset bar docked at the top of the window.
+- Test suite broadened from 42 to cover the new Knee stage (null test against v0.1's exact hard-knee formula, curve-shape/continuity assertions, per-band-default-divergence and attack/release-ordering regression guarantees), the M2 preset system (save/load round-trip, forward/backward-compat import, factory preset validation, default resolution, dirty-flag lifecycle, prev/next traversal, bank export/import), a v0.1-state migration-tolerance test (a state missing the new Knee IDs loads cleanly with Knee at its declared default), and i18n coverage (every preset-bar translation key present, no parameter names leaked into the German mapping).
+
+### Changed
+
+- `BandCompressor` no longer wraps `juce::dsp::Compressor`; it now drives `juce::dsp::BallisticsFilter` (the same envelope-follower class `Compressor` used internally) through `KneeGainComputer`'s knee-aware gain computation. Behaviourally identical to v0.1 at `Knee = 0%`.
+- `docs/manual.md` and `docs/architecture.md` updated for the new Knee parameter, per-band defaults, the preset system, and the i18n frame; `docs/design-brief.md`/`docs/research-notes.md` added (the sourced rationale behind every changed default).
+
+### Deferred
+
+- Per-band Mid/Side processing, an RMS/Peak-selectable detector mode, and program-dependent/auto-release were identified in this pass's research as further reference-class gaps but deliberately left unimplemented - see `docs/architecture.md`'s "Deferred from v0.2.0" section and `docs/design-brief.md`'s honesty section.
+
 ## [0.1.1] - 2026-07-16
 
 ### Changed

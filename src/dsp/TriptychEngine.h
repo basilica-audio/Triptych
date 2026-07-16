@@ -64,18 +64,21 @@ public:
     // number >= 1, ms). Safe to call every block from the audio thread.
     void setLowThresholdDb (float newThresholdDb) { lowBand.setThresholdDb (newThresholdDb); }
     void setLowRatio (float newRatio) { lowBand.setRatio (newRatio); }
+    void setLowKneePercent (float newKneePercent) { lowBand.setKneePercent (newKneePercent); }
     void setLowAttackMs (float newAttackMs) { lowBand.setAttackMs (newAttackMs); }
     void setLowReleaseMs (float newReleaseMs) { lowBand.setReleaseMs (newReleaseMs); }
     void setLowMakeupDb (float newMakeupDb) { lowBand.setMakeupDb (newMakeupDb); }
 
     void setMidThresholdDb (float newThresholdDb) { midBand.setThresholdDb (newThresholdDb); }
     void setMidRatio (float newRatio) { midBand.setRatio (newRatio); }
+    void setMidKneePercent (float newKneePercent) { midBand.setKneePercent (newKneePercent); }
     void setMidAttackMs (float newAttackMs) { midBand.setAttackMs (newAttackMs); }
     void setMidReleaseMs (float newReleaseMs) { midBand.setReleaseMs (newReleaseMs); }
     void setMidMakeupDb (float newMakeupDb) { midBand.setMakeupDb (newMakeupDb); }
 
     void setHighThresholdDb (float newThresholdDb) { highBand.setThresholdDb (newThresholdDb); }
     void setHighRatio (float newRatio) { highBand.setRatio (newRatio); }
+    void setHighKneePercent (float newKneePercent) { highBand.setKneePercent (newKneePercent); }
     void setHighAttackMs (float newAttackMs) { highBand.setAttackMs (newAttackMs); }
     void setHighReleaseMs (float newReleaseMs) { highBand.setReleaseMs (newReleaseMs); }
     void setHighMakeupDb (float newMakeupDb) { highBand.setMakeupDb (newMakeupDb); }

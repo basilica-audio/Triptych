@@ -18,7 +18,7 @@ namespace ParamIDs
     inline constexpr auto lowMidSplit = "lowMidSplit";
     inline constexpr auto midHighSplit = "midHighSplit";
 
-    // Low band: threshold/ratio/attack/release/makeup, applied below
+    // Low band: threshold/ratio/knee/attack/release/makeup, applied below
     // lowMidSplit.
     inline constexpr auto lowThreshold = "lowThreshold";
     inline constexpr auto lowRatio = "lowRatio";
@@ -39,6 +39,18 @@ namespace ParamIDs
     inline constexpr auto highAttack = "highAttack";
     inline constexpr auto highRelease = "highRelease";
     inline constexpr auto highMakeup = "highMakeup";
+
+    // Knee (v0.2.0 / design-brief.md): 0-100%, applied threshold-relative in
+    // extent (see src/dsp/KneeGainComputer.h). Added after the v0.1 IDs
+    // above rather than interleaved with them, so the frozen-ID contract in
+    // this file's header comment is unambiguous about what shipped in v0.1
+    // vs. what v0.2.0 adds - existing IDs are untouched, these three are
+    // purely additive. State migration: a v0.1-shaped ValueTree missing
+    // these IDs loads tolerantly at the declared default (50%) - see
+    // tests/StateTests.cpp's migration-tolerance test.
+    inline constexpr auto lowKnee = "lowKnee";
+    inline constexpr auto midKnee = "midKnee";
+    inline constexpr auto highKnee = "highKnee";
 
     // Per-band Mute/Solo (M1): applied at the summing stage in
     // TriptychEngine, not inside BandCompressor itself - muting/soloing is a

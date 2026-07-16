@@ -30,7 +30,9 @@ Input --> LR4 @ Low/Mid Split             |                             |
                               \-> BandComp (High) + optional Limiter ---+
 ```
 
-Each band's own compressor (Threshold/Ratio/Attack/Release + Makeup) runs first; the High band can additionally engage a brickwall-style Limiter after its compressor. Every band's contribution is then gated by its own Mute/Solo state before the three bands are summed and trimmed by the master Output control. See [`docs/architecture.md`](architecture.md) for the full engineering breakdown (flat-sum crossover property, compressor bypass identity, limiter behaviour, parameter smoothing).
+Each band's own compressor (Knee → Threshold/Ratio → Attack/Release + Makeup) runs first; the High band can additionally engage a brickwall-style Limiter after its compressor. Every band's contribution is then gated by its own Mute/Solo state before the three bands are summed and trimmed by the master Output control. See [`docs/architecture.md`](architecture.md) for the full engineering breakdown (flat-sum crossover property, the v0.2.0 soft-knee gain computer, compressor bypass identity, limiter behaviour, parameter smoothing).
+
+**A note on v0.2.0's voicing.** The per-band defaults below (and the factory presets in [`docs/presets.md`](presets.md)) are **research-derived**, sourced from published manufacturer manuals and mastering-engineer technique articles for the multiband-compression reference class - not measured against reference hardware. See [`docs/research-notes.md`](research-notes.md) for the sourced quotes/URLs and [`docs/design-brief.md`](design-brief.md) for the full rationale and confidence notes behind every changed default.
 
 ## Parameter reference
 
@@ -41,15 +43,16 @@ Each band's own compressor (Threshold/Ratio/Attack/Release + Makeup) runs first;
 | **Low/Mid Split** | 40 – 1000 | 200 | Hz | The crossover point between the Low and Mid bands. Everything below this frequency is the Low band; everything above feeds the second crossover. A minimum separation from Mid/High Split is enforced at all times, so automation can never invert band order. |
 | **Mid/High Split** | 400 – 12000 | 3000 | Hz | The crossover point between the Mid and High bands. |
 
-### Per-band controls (Low, Mid, High - identical ranges on every band)
+### Per-band controls (Low, Mid, High - identical ranges on every band; **defaults now differ per band as of v0.2.0** - see the note above)
 
-| Parameter | Range | Default | Unit | What it does musically |
-|---|---|---|---|---|
-| **Threshold** | -60 – 0 | -18 | dB | The level above which the band's compressor starts reducing gain. Lower it to catch more of the signal; raise it toward 0 dB to only catch the loudest peaks. |
-| **Ratio** | 1:1 – 20:1 | 4:1 | : 1 | How hard the band compresses once above Threshold. 1:1 is an exact bypass of that band's compressor (useful for A/B-ing one band's effect against the others). Higher ratios (10:1+) approach limiting. |
-| **Attack** | 0.1 – 100 | 10 | ms | How quickly the compressor reacts once the signal crosses Threshold. Fast attack (under ~5 ms) catches transients hard but can dull pick/mallet attack on drums and guitars; slower attack lets transients through before gain reduction kicks in, preserving punch. |
-| **Release** | 10 – 1000 | 100 | ms | How quickly gain reduction recovers once the signal drops back below Threshold. Fast release can pump audibly with sustained material (bass, sustained pads); slow release smooths gain reduction out but can "duck" the following transient if it's set too slow relative to the material's tempo. |
-| **Makeup** | -12 – +24 | 0 | dB | Output trim applied to that band alone, after compression, before the Mute/Solo gate and the sum. Use it to restore the level lost to gain reduction, or to deliberately rebalance a band's contribution to the mix. |
+| Parameter | Range | Low default | Mid default | High default | Unit | What it does musically |
+|---|---|---|---|---|---|---|
+| **Threshold** | -60 – 0 | -24 | -30 | -20 | dB | The level above which the band's compressor starts reducing gain. Lower it to catch more of the signal; raise it toward 0 dB to only catch the loudest peaks. Mid's lower default leans toward the "density/knit-together" mastering philosophy; Low/High lean toward "peak control" (see the research-derived note above). |
+| **Ratio** | 1:1 – 20:1 | 2.5:1 | 1.8:1 | 2:1 | : 1 | How hard the band compresses once above Threshold. 1:1 is an exact bypass of that band's compressor (useful for A/B-ing one band's effect against the others), independent of Knee. Higher ratios (10:1+) approach limiting. |
+| **Knee** *(new in v0.2.0)* | 0 – 100 | 50 | 50 | 50 | % | How gradually the compressor transitions into gain reduction around Threshold. 0% is a hard knee (compression starts abruptly right at Threshold); 100% is the widest soft-knee transition, scaled to span from Threshold down to twice its distance from 0 dBFS - so the knee's width in dB adapts sensibly whether Threshold sits near 0 dB or near -50 dB. |
+| **Attack** | 0.1 – 100 | 25 | 10 | 5 | ms | How quickly the compressor reacts once the signal crosses Threshold. Low's slower default lets low-frequency transients (which "lack fast transients" in the first place) through before gain reduction kicks in; High's faster default catches fast transient material. Fast attack (under ~5 ms) catches transients hard but can dull pick/mallet attack; slower attack preserves punch. |
+| **Release** | 10 – 1000 | 180 | 100 | 55 | ms | How quickly gain reduction recovers once the signal drops back below Threshold. Low's longer default (~1.8x Mid) accounts for low-frequency decay characteristics; High's shorter default (~0.5x Mid) suits faster transient material. Fast release can pump audibly with sustained material; slow release smooths gain reduction out but can "duck" the following transient if set too slow relative to the material's tempo. |
+| **Makeup** | -12 – +24 | 0 | 0 | 0 | dB | Output trim applied to that band alone, after compression, before the Mute/Solo gate and the sum. Use it to restore the level lost to gain reduction, or to deliberately rebalance a band's contribution to the mix. |
 
 ### Per-band Mute / Solo (Low, Mid, High)
 
@@ -70,6 +73,14 @@ Each band's own compressor (Threshold/Ratio/Attack/Release + Makeup) runs first;
 | Parameter | Range | Default | Unit | What it does |
 |---|---|---|---|---|
 | **Output** | -24 – +24 | 0 | dB | Master trim applied after the three bands are summed - the final gain stage in the plugin. Use it to match Triptych's output level to whatever follows it in the chain (typically a brickwall limiter on the master bus). |
+
+## Presets
+
+Triptych ships with eight factory presets (Default, Density Glue, Peak Control, Low-End Tighten, De-Harsh Highs, Mastering Safety Ceiling, Parallel-Style Density, Hard Limiter Ceiling) covering both the peak-control and density mastering philosophies documented in [`docs/research-notes.md`](research-notes.md), plus single-band-focused workflow presets. See [`docs/presets.md`](presets.md) for what each one is for. The preset bar at the top of the plugin window lets you browse factory and user presets, save/rename/delete your own, set a default that loads on every fresh instance, and import/export single presets or whole preset banks (`.basilicapreset`/`.zip`). User presets are stored per-plugin under `~/Library/Audio/Presets/Yves Vogl/Triptych/` on macOS (`%APPDATA%\Yves Vogl\Triptych\Presets\` on Windows).
+
+## Localisation
+
+The preset bar's labels, menus, and dialogs follow your system language automatically - German if your system language starts with "de", English otherwise. This covers only the preset bar's own interface text; parameter names, units, and every other technical term in this manual stay in English regardless of system language, matching every other plugin in the suite.
 
 ## Tips
 

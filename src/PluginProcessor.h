@@ -4,6 +4,7 @@
 #include <juce_dsp/juce_dsp.h>
 
 #include "dsp/TriptychEngine.h"
+#include "presets/PresetManager.h"
 
 // Triptych: a 3-band multiband compressor for dense metal mixes. Signal flow
 // lives in TriptychEngine (src/dsp) so it stays unit-testable independent of
@@ -50,6 +51,14 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    // M2 preset system (.scaffold/specs/preset-system-m2.md,
+    // src/presets/PresetManager.h). Constructed after apvts (its
+    // constructor registers APVTS parameter listeners) and public so
+    // TriptychAudioProcessorEditor's PresetBar can talk to it directly - the
+    // same "processor owns it, editor references it" pattern apvts itself
+    // already uses.
+    basilica::presets::PresetManager presetManager;
+
 private:
     TriptychEngine engine;
 
@@ -61,18 +70,21 @@ private:
 
     std::atomic<float>* lowThresholdDb = nullptr;
     std::atomic<float>* lowRatio = nullptr;
+    std::atomic<float>* lowKneePercent = nullptr;
     std::atomic<float>* lowAttackMs = nullptr;
     std::atomic<float>* lowReleaseMs = nullptr;
     std::atomic<float>* lowMakeupDb = nullptr;
 
     std::atomic<float>* midThresholdDb = nullptr;
     std::atomic<float>* midRatio = nullptr;
+    std::atomic<float>* midKneePercent = nullptr;
     std::atomic<float>* midAttackMs = nullptr;
     std::atomic<float>* midReleaseMs = nullptr;
     std::atomic<float>* midMakeupDb = nullptr;
 
     std::atomic<float>* highThresholdDb = nullptr;
     std::atomic<float>* highRatio = nullptr;
+    std::atomic<float>* highKneePercent = nullptr;
     std::atomic<float>* highAttackMs = nullptr;
     std::atomic<float>* highReleaseMs = nullptr;
     std::atomic<float>* highMakeupDb = nullptr;

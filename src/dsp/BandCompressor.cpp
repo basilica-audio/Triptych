@@ -1,8 +1,9 @@
 #include "BandCompressor.h"
+#include "KneeGainComputer.h"
 
 void BandCompressor::prepare (const juce::dsp::ProcessSpec& spec)
 {
-    compressor.prepare (spec);
+    envelopeFilter.prepare (spec);
 
     makeupGain.setRampDurationSeconds (smoothingTimeSeconds);
     makeupGain.prepare (spec);
@@ -15,14 +16,10 @@ void BandCompressor::prepare (const juce::dsp::ProcessSpec& spec)
     thresholdSmoothed.setCurrentAndTargetValue (lastThresholdDb);
     ratioSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
     ratioSmoothed.setCurrentAndTargetValue (lastRatio);
+    kneeSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
+    kneeSmoothed.setCurrentAndTargetValue (lastKneePercent);
 
     reset();
-
-    // Prime the compressor's threshold/ratio immediately so the very first
-    // process() call runs with the correct, non-default values rather than
-    // juce::dsp::Compressor's built-in defaults (0 dB threshold, 1:1 ratio).
-    compressor.setThreshold (lastThresholdDb);
-    compressor.setRatio (lastRatio);
 
     limiter.setThreshold (lastLimiterThresholdDb);
     limiter.setRelease (limiterReleaseMs);
@@ -30,7 +27,7 @@ void BandCompressor::prepare (const juce::dsp::ProcessSpec& spec)
 
 void BandCompressor::reset()
 {
-    compressor.reset();
+    envelopeFilter.reset();
     makeupGain.reset();
     limiter.reset();
 }
@@ -47,14 +44,20 @@ void BandCompressor::setRatio (float newRatio)
     ratioSmoothed.setTargetValue (newRatio);
 }
 
+void BandCompressor::setKneePercent (float newKneePercent)
+{
+    lastKneePercent = newKneePercent;
+    kneeSmoothed.setTargetValue (newKneePercent);
+}
+
 void BandCompressor::setAttackMs (float newAttackMs)
 {
-    compressor.setAttack (newAttackMs);
+    envelopeFilter.setAttackTime (newAttackMs);
 }
 
 void BandCompressor::setReleaseMs (float newReleaseMs)
 {
-    compressor.setRelease (newReleaseMs);
+    envelopeFilter.setReleaseTime (newReleaseMs);
 }
 
 void BandCompressor::setMakeupDb (float newMakeupDb)
@@ -75,15 +78,31 @@ void BandCompressor::process (juce::dsp::AudioBlock<float>& block) noexcept
     if (numSamples == 0)
         return;
 
-    // Coefficient recomputation (Decibels::decibelsToGain, pow) is cheap but
-    // still not something we interpolate per sample; threshold/ratio are
-    // smoothed and re-derived once per block, the same compromise
-    // OvertureEngine/TriptychEngine use for IIR filter cutoffs.
-    compressor.setThreshold (thresholdSmoothed.skip (static_cast<int> (numSamples)));
-    compressor.setRatio (ratioSmoothed.skip (static_cast<int> (numSamples)));
+    // Coefficient recomputation is cheap but still not something we
+    // interpolate per sample; threshold/ratio/knee are smoothed and
+    // re-derived once per block, the same compromise OvertureEngine/
+    // TriptychEngine use for IIR filter cutoffs (see BandCompressor.h).
+    const auto thresholdDbBlock = thresholdSmoothed.skip (static_cast<int> (numSamples));
+    const auto ratioBlock = ratioSmoothed.skip (static_cast<int> (numSamples));
+    const auto kneePercentBlock = kneeSmoothed.skip (static_cast<int> (numSamples));
+
+    const auto numChannels = block.getNumChannels();
+
+    for (size_t channel = 0; channel < numChannels; ++channel)
+    {
+        auto* channelData = block.getChannelPointer (channel);
+
+        for (size_t i = 0; i < numSamples; ++i)
+        {
+            const auto inputValue = channelData[i];
+            const auto envelope = envelopeFilter.processSample (static_cast<int> (channel), inputValue);
+            const auto gain = trpt::computeGainLinear (envelope, thresholdDbBlock, ratioBlock, kneePercentBlock);
+
+            channelData[i] = gain * inputValue;
+        }
+    }
 
     juce::dsp::ProcessContextReplacing<float> context (block);
-    compressor.process (context);
     makeupGain.process (context);
 
     // The optional limiter stage always runs, unconditionally (never
@@ -92,16 +111,16 @@ void BandCompressor::process (juce::dsp::AudioBlock<float>& block) noexcept
     // currently switched into the output - see setLimiterEnabled's doc
     // comment in BandCompressor.h for why toggling juce::dsp::Limiter's own
     // isBypassed flag (the previous approach) does not achieve that.
-    const auto numChannels = juce::jmin (block.getNumChannels(), static_cast<size_t> (limiterScratchBuffer.getNumChannels()));
+    const auto scratchChannels = juce::jmin (numChannels, static_cast<size_t> (limiterScratchBuffer.getNumChannels()));
     const auto scratchSamples = juce::jmin (numSamples, static_cast<size_t> (limiterScratchBuffer.getNumSamples()));
 
-    if (numChannels == 0 || scratchSamples == 0)
+    if (scratchChannels == 0 || scratchSamples == 0)
         return;
 
     auto scratchBlock = juce::dsp::AudioBlock<float> (limiterScratchBuffer)
                              .getSubBlock (0, scratchSamples)
-                             .getSubsetChannelBlock (0, numChannels);
-    scratchBlock.copyFrom (block.getSubBlock (0, scratchSamples).getSubsetChannelBlock (0, numChannels));
+                             .getSubsetChannelBlock (0, scratchChannels);
+    scratchBlock.copyFrom (block.getSubBlock (0, scratchSamples).getSubsetChannelBlock (0, scratchChannels));
 
     juce::dsp::ProcessContextReplacing<float> limiterContext (scratchBlock);
     limiter.process (limiterContext);
@@ -111,5 +130,5 @@ void BandCompressor::process (juce::dsp::AudioBlock<float>& block) noexcept
     // exactly the unlimited compressor+makeup signal, even though the
     // limiter kept processing "in the background" above.
     if (limiterEnabled)
-        block.getSubBlock (0, scratchSamples).getSubsetChannelBlock (0, numChannels).copyFrom (scratchBlock);
+        block.getSubBlock (0, scratchSamples).getSubsetChannelBlock (0, scratchChannels).copyFrom (scratchBlock);
 }

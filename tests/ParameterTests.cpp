@@ -42,30 +42,52 @@ namespace
         CHECK (param->getDefaultValue() == Catch::Approx (param->convertTo0to1 (expectedDefault)).margin (1e-4));
     }
 
-    // Checks all five per-band parameters (Threshold/Ratio/Attack/Release/
-    // Makeup) share the same ranges/defaults, since Low/Mid/High all use the
-    // identical set built by ParameterLayout.cpp's addBandParameters().
-    void checkBandDefaultsAndRanges (juce::AudioProcessorValueTreeState& apvts,
-                                      const char* thresholdId,
-                                      const char* ratioId,
-                                      const char* attackId,
-                                      const char* releaseId,
-                                      const char* makeupId)
+    // Ranges are structurally identical across Low/Mid/High (see
+    // ParameterLayout.cpp's addBandParameters()) - checked once per band
+    // here, independent of the per-band defaults (which differ as of
+    // v0.2.0 and are checked separately below via checkBandDefaults()).
+    void checkBandRanges (juce::AudioProcessorValueTreeState& apvts,
+                           const char* thresholdId,
+                           const char* ratioId,
+                           const char* kneeId,
+                           const char* attackId,
+                           const char* releaseId,
+                           const char* makeupId)
     {
-        checkFloatDefault (apvts, thresholdId, -18.0f);
         checkFloatRange (apvts, thresholdId, -60.0f, 0.0f);
-
-        checkFloatDefault (apvts, ratioId, 4.0f);
         checkFloatRange (apvts, ratioId, 1.0f, 20.0f);
-
-        checkFloatDefault (apvts, attackId, 10.0f);
+        checkFloatRange (apvts, kneeId, 0.0f, 100.0f);
         checkFloatRange (apvts, attackId, 0.1f, 100.0f);
-
-        checkFloatDefault (apvts, releaseId, 100.0f);
         checkFloatRange (apvts, releaseId, 10.0f, 1000.0f);
-
-        checkFloatDefault (apvts, makeupId, 0.0f);
         checkFloatRange (apvts, makeupId, -12.0f, 24.0f);
+    }
+
+    // v0.2.0 (docs/design-brief.md): Threshold/Ratio/Attack/Release defaults
+    // now differ per band - Knee and Makeup stay identical across bands (see
+    // ParameterLayout.cpp).
+    struct BandDefaults
+    {
+        float thresholdDb;
+        float ratio;
+        float attackMs;
+        float releaseMs;
+    };
+
+    void checkBandDefaults (juce::AudioProcessorValueTreeState& apvts,
+                             const char* thresholdId,
+                             const char* ratioId,
+                             const char* kneeId,
+                             const char* attackId,
+                             const char* releaseId,
+                             const char* makeupId,
+                             const BandDefaults& defaults)
+    {
+        checkFloatDefault (apvts, thresholdId, defaults.thresholdDb);
+        checkFloatDefault (apvts, ratioId, defaults.ratio);
+        checkFloatDefault (apvts, kneeId, 50.0f);
+        checkFloatDefault (apvts, attackId, defaults.attackMs);
+        checkFloatDefault (apvts, releaseId, defaults.releaseMs);
+        checkFloatDefault (apvts, makeupId, 0.0f);
     }
 }
 
@@ -83,9 +105,9 @@ TEST_CASE ("Processor instantiates with the expected parameters", "[processor][p
     {
         static constexpr const char* allIds[] = {
             ParamIDs::lowMidSplit, ParamIDs::midHighSplit,
-            ParamIDs::lowThreshold, ParamIDs::lowRatio, ParamIDs::lowAttack, ParamIDs::lowRelease, ParamIDs::lowMakeup,
-            ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
-            ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
+            ParamIDs::lowThreshold, ParamIDs::lowRatio, ParamIDs::lowKnee, ParamIDs::lowAttack, ParamIDs::lowRelease, ParamIDs::lowMakeup,
+            ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midKnee, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
+            ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highKnee, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
             ParamIDs::lowMute, ParamIDs::lowSolo, ParamIDs::midMute, ParamIDs::midSolo, ParamIDs::highMute, ParamIDs::highSolo,
             ParamIDs::highLimiterEnabled, ParamIDs::highLimiterThreshold,
             ParamIDs::output,
@@ -95,11 +117,12 @@ TEST_CASE ("Processor instantiates with the expected parameters", "[processor][p
             CHECK (apvts.getParameter (id) != nullptr);
     }
 
-    SECTION ("total parameter count matches the v0.1.0 layout")
+    SECTION ("total parameter count matches the v0.2.0 layout")
     {
-        // 2 splits + 3 bands * 5 + 3 bands * 2 (Mute/Solo) + 2 (High limiter
-        // enable/threshold) + 1 output = 26.
-        CHECK (apvts.processor.getParameters().size() == 26);
+        // 2 splits + 3 bands * 6 (Threshold/Ratio/Knee/Attack/Release/Makeup
+        // - Knee added in v0.2.0) + 3 bands * 2 (Mute/Solo) + 2 (High limiter
+        // enable/threshold) + 1 output = 29.
+        CHECK (apvts.processor.getParameters().size() == 29);
     }
 
     SECTION ("Mute/Solo default off for every band")
@@ -136,22 +159,46 @@ TEST_CASE ("Processor instantiates with the expected parameters", "[processor][p
         checkFloatRange (apvts, ParamIDs::midHighSplit, 400.0f, 12000.0f);
     }
 
-    SECTION ("Low band: defaults and ranges")
+    SECTION ("Low band: ranges (identical structure across bands)")
     {
-        checkBandDefaultsAndRanges (apvts,
-                                     ParamIDs::lowThreshold, ParamIDs::lowRatio, ParamIDs::lowAttack, ParamIDs::lowRelease, ParamIDs::lowMakeup);
+        checkBandRanges (apvts,
+                          ParamIDs::lowThreshold, ParamIDs::lowRatio, ParamIDs::lowKnee, ParamIDs::lowAttack, ParamIDs::lowRelease, ParamIDs::lowMakeup);
     }
 
-    SECTION ("Mid band: defaults and ranges")
+    SECTION ("Mid band: ranges (identical structure across bands)")
     {
-        checkBandDefaultsAndRanges (apvts,
-                                     ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup);
+        checkBandRanges (apvts,
+                          ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midKnee, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup);
     }
 
-    SECTION ("High band: defaults and ranges")
+    SECTION ("High band: ranges (identical structure across bands)")
     {
-        checkBandDefaultsAndRanges (apvts,
-                                     ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup);
+        checkBandRanges (apvts,
+                          ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highKnee, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup);
+    }
+
+    // v0.2.0 (docs/design-brief.md): defaults now differ per band, replacing
+    // v0.1's single uniform default (-18 dB / 4:1 / 10 ms / 100 ms) shared
+    // across Low/Mid/High. Knee defaults to 50% on every band regardless.
+    SECTION ("Low band: v0.2.0 per-band defaults")
+    {
+        checkBandDefaults (apvts,
+                            ParamIDs::lowThreshold, ParamIDs::lowRatio, ParamIDs::lowKnee, ParamIDs::lowAttack, ParamIDs::lowRelease, ParamIDs::lowMakeup,
+                            { -24.0f, 2.5f, 25.0f, 180.0f });
+    }
+
+    SECTION ("Mid band: v0.2.0 per-band defaults")
+    {
+        checkBandDefaults (apvts,
+                            ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midKnee, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
+                            { -30.0f, 1.8f, 10.0f, 100.0f });
+    }
+
+    SECTION ("High band: v0.2.0 per-band defaults")
+    {
+        checkBandDefaults (apvts,
+                            ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highKnee, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
+                            { -20.0f, 2.0f, 5.0f, 55.0f });
     }
 
     SECTION ("Output: defaults and range")

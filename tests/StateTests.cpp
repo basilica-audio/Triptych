@@ -18,9 +18,9 @@ TEST_CASE ("State round-trip preserves non-default values of every parameter", "
     // normalised value per parameter" technique doesn't apply to them.
     static constexpr const char* allIds[] = {
         ParamIDs::lowMidSplit, ParamIDs::midHighSplit,
-        ParamIDs::lowThreshold, ParamIDs::lowRatio, ParamIDs::lowAttack, ParamIDs::lowRelease, ParamIDs::lowMakeup,
-        ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
-        ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
+        ParamIDs::lowThreshold, ParamIDs::lowRatio, ParamIDs::lowKnee, ParamIDs::lowAttack, ParamIDs::lowRelease, ParamIDs::lowMakeup,
+        ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midKnee, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
+        ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highKnee, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
         ParamIDs::highLimiterThreshold,
         ParamIDs::output,
     };
@@ -119,4 +119,105 @@ TEST_CASE ("State round-trip preserves every bool parameter (Mute/Solo, High lim
 
     for (auto* param : params)
         CHECK (param->getValue() == Catch::Approx (1.0f));
+}
+
+// v0.2.0 state migration tolerance (docs/design-brief.md guarantee #7):
+// a v0.1-shaped ValueTree - i.e. one missing the three new Knee parameter
+// IDs entirely, as any session/preset saved before v0.2.0 would be - must
+// load without crashing or asserting, and each Knee parameter must resolve
+// to its declared ParameterLayout default (50%) rather than 0 or garbage.
+//
+// This works "for free" via AudioProcessorValueTreeState::replaceState()'s
+// own existing behaviour (JUCE 8.0.14,
+// juce_audio_processors/utilities/juce_AudioProcessorValueTreeState.cpp):
+// updateParameterConnectionsToChildTrees() only calls setDenormalisedValue()
+// for parameters whose PARAM child *is present* in the incoming tree: a
+// parameter absent from it (Knee here) keeps its current in-memory value
+// rather than being reset to 0 - so for a freshly constructed processor
+// (Knee already sitting at its ParameterLayout default from construction,
+// untouched), the missing-ID case resolves to that same default. No
+// special-case code is needed in TriptychAudioProcessor::setStateInformation()
+// - this test exists to pin that behaviour down explicitly rather than leave
+// it merely implied by the general APVTS mechanism.
+TEST_CASE ("State migration tolerance: a v0.1-shaped state (missing Knee IDs) loads cleanly with Knee at its default", "[state][regression]")
+{
+    // Build a v0.1-shaped state by taking a real v0.2.0 state and pruning
+    // the three Knee PARAM child nodes out of it - deliberately not just an
+    // empty/default tree, so the other restored parameters below prove the
+    // pruned state actually gets applied, not just silently ignored.
+    TriptychAudioProcessor source;
+    source.prepareToPlay (48000.0, 512);
+
+    auto* lowThresholdParam = source.apvts.getParameter (ParamIDs::lowThreshold);
+    auto* outputParam = source.apvts.getParameter (ParamIDs::output);
+    REQUIRE (lowThresholdParam != nullptr);
+    REQUIRE (outputParam != nullptr);
+
+    lowThresholdParam->setValueNotifyingHost (lowThresholdParam->convertTo0to1 (-33.0f));
+    outputParam->setValueNotifyingHost (outputParam->convertTo0to1 (6.0f));
+
+    juce::MemoryBlock v020State;
+    source.getStateInformation (v020State);
+    REQUIRE (v020State.getSize() > 0);
+
+    const std::unique_ptr<juce::XmlElement> xml (source.getXmlFromBinary (v020State.getData(), static_cast<int> (v020State.getSize())));
+    REQUIRE (xml != nullptr);
+
+    auto prunedTree = juce::ValueTree::fromXml (*xml);
+    REQUIRE (prunedTree.isValid());
+
+    static constexpr const char* kneeIds[] = { ParamIDs::lowKnee, ParamIDs::midKnee, ParamIDs::highKnee };
+
+    for (const auto* kneeId : kneeIds)
+    {
+        for (int i = prunedTree.getNumChildren() - 1; i >= 0; --i)
+        {
+            auto child = prunedTree.getChild (i);
+
+            if (child.getProperty ("id").toString() == juce::String (kneeId))
+                prunedTree.removeChild (i, nullptr);
+        }
+    }
+
+    // Sanity: the pruned tree genuinely has fewer PARAM children than a full
+    // v0.2.0 state - otherwise this test would silently not exercise the
+    // scenario it claims to.
+    const auto fullChildCount = juce::ValueTree::fromXml (*xml).getNumChildren();
+    REQUIRE (prunedTree.getNumChildren() == fullChildCount - 3);
+
+    const std::unique_ptr<juce::XmlElement> prunedXml (prunedTree.createXml());
+    juce::MemoryBlock prunedState;
+    juce::AudioProcessor::copyXmlToBinary (*prunedXml, prunedState);
+
+    // A fresh destination processor: every Knee parameter is already
+    // sitting at its ParameterLayout default (50%) purely from construction,
+    // untouched - this is what the "missing ID keeps its current value"
+    // APVTS mechanism relies on for the guarantee under test.
+    TriptychAudioProcessor destination;
+    destination.prepareToPlay (48000.0, 512);
+
+    CHECK_NOTHROW (destination.setStateInformation (prunedState.getData(), static_cast<int> (prunedState.getSize())));
+
+    // The pruned-but-present parameters were genuinely restored...
+    auto* destLowThreshold = destination.apvts.getParameter (ParamIDs::lowThreshold);
+    auto* destOutput = destination.apvts.getParameter (ParamIDs::output);
+    REQUIRE (destLowThreshold != nullptr);
+    REQUIRE (destOutput != nullptr);
+    CHECK (destLowThreshold->convertFrom0to1 (destLowThreshold->getValue()) == Catch::Approx (-33.0f).margin (1e-3));
+    CHECK (destOutput->convertFrom0to1 (destOutput->getValue()) == Catch::Approx (6.0f).margin (1e-3));
+
+    // ...while every Knee parameter, entirely absent from the pruned state,
+    // resolved to its declared default (50%), not 0% or an assertion.
+    for (const auto* kneeId : kneeIds)
+    {
+        auto* kneeParam = destination.apvts.getParameter (kneeId);
+        REQUIRE (kneeParam != nullptr);
+        CHECK (kneeParam->convertFrom0to1 (kneeParam->getValue()) == Catch::Approx (50.0f).margin (1e-3));
+    }
+
+    // Processing must also work cleanly afterwards - no crash/assert.
+    juce::AudioBuffer<float> buffer (2, 512);
+    buffer.clear();
+    juce::MidiBuffer midi;
+    CHECK_NOTHROW (destination.processBlock (buffer, midi));
 }

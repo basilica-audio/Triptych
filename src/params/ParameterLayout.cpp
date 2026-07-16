@@ -20,51 +20,75 @@ namespace
             { return juce::mapFromLog10 (value, start, end); });
     }
 
-    // Adds the five per-band parameters (Threshold, Ratio, Attack, Release,
-    // Makeup) shared identically by the Low/Mid/High bands, so the actual
-    // values/ranges below live in exactly one place rather than being
-    // repeated three times with room for the copies to drift apart.
+    // Adds the six per-band parameters (Threshold, Ratio, Knee, Attack,
+    // Release, Makeup) shared *structurally* by the Low/Mid/High bands, so
+    // the ranges/units live in exactly one place - but per docs/design-brief.md
+    // (v0.2.0's research-derived recalibration), Threshold/Ratio/Attack/
+    // Release *defaults* now differ per band, passed in explicitly rather
+    // than hard-coded, replacing v0.1's single uniform default copy-pasted
+    // three times. Knee and Makeup keep one shared default across all three
+    // bands - no sourced reason found for a per-band Knee/Makeup default (see
+    // docs/research-notes.md).
     void addBandParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout,
                              const char* thresholdId,
                              const char* ratioId,
+                             const char* kneeId,
                              const char* attackId,
                              const char* releaseId,
                              const char* makeupId,
-                             const juce::String& labelPrefix)
+                             const juce::String& labelPrefix,
+                             float thresholdDefaultDb,
+                             float ratioDefault,
+                             float attackDefaultMs,
+                             float releaseDefaultMs)
     {
-        // Threshold: -60 to 0 dB, default -18 dB.
+        // Threshold: -60 to 0 dB, per-band default (see call sites below).
         layout.add (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { thresholdId, 1 },
             labelPrefix + " Threshold",
             juce::NormalisableRange<float> (-60.0f, 0.0f, 0.01f),
-            -18.0f,
+            thresholdDefaultDb,
             juce::AudioParameterFloatAttributes().withLabel ("dB")));
 
-        // Ratio: 1:1 (no compression) to 20:1, default 4:1.
+        // Ratio: 1:1 (no compression) to 20:1, per-band default.
         layout.add (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { ratioId, 1 },
             labelPrefix + " Ratio",
             juce::NormalisableRange<float> (1.0f, 20.0f, 0.01f),
-            4.0f,
+            ratioDefault,
             juce::AudioParameterFloatAttributes().withLabel (":1")));
 
-        // Attack: 0.1-100 ms, default 10 ms.
+        // Knee (new in v0.2.0): 0-100%, default 50% on every band. 0% is an
+        // exact hard knee (v0.1's prior behaviour, preserved bit-for-bit at
+        // this extreme - see src/dsp/KneeGainComputer.h); 100% is the widest
+        // soft-knee transition, extent scaled to twice the threshold-to-0dB
+        // span (Weiss DS1-MK3 "0 to twice the threshold value" convention,
+        // see docs/research-notes.md).
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { kneeId, 1 },
+            labelPrefix + " Knee",
+            juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f),
+            50.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("%")));
+
+        // Attack: 0.1-100 ms, per-band default.
         layout.add (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { attackId, 1 },
             labelPrefix + " Attack",
             makeLogRange (0.1f, 100.0f),
-            10.0f,
+            attackDefaultMs,
             juce::AudioParameterFloatAttributes().withLabel ("ms")));
 
-        // Release: 10-1000 ms, default 100 ms.
+        // Release: 10-1000 ms, per-band default.
         layout.add (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { releaseId, 1 },
             labelPrefix + " Release",
             makeLogRange (10.0f, 1000.0f),
-            100.0f,
+            releaseDefaultMs,
             juce::AudioParameterFloatAttributes().withLabel ("ms")));
 
-        // Makeup: -12 to +24 dB, default 0 dB.
+        // Makeup: -12 to +24 dB, default 0 dB on every band - a calibration
+        // trim, not a voicing parameter (see docs/design-brief.md).
         layout.add (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { makeupId, 1 },
             labelPrefix + " Makeup",
@@ -95,7 +119,9 @@ namespace trpt
         juce::AudioProcessorValueTreeState::ParameterLayout layout;
 
         //======================================================================
-        // Low/Mid split: 40-1000 Hz, default 200 Hz.
+        // Low/Mid split: 40-1000 Hz, default 200 Hz. Unchanged in v0.2.0 -
+        // research confirms this default already sits inside the reference
+        // class's converged starting-point range (see docs/research-notes.md).
         layout.add (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { ParamIDs::lowMidSplit, 1 },
             "Low/Mid Split",
@@ -104,12 +130,12 @@ namespace trpt
             juce::AudioParameterFloatAttributes().withLabel ("Hz")));
 
         //======================================================================
-        // Mid/High split: 400-12000 Hz, default 3000 Hz. Deliberately
-        // overlaps the Low/Mid range at the edges - TriptychEngine enforces
-        // a minimum runtime separation between the two rather than the
-        // ranges themselves being disjoint, so a user can still, e.g., set a
-        // fairly high Low/Mid split and a fairly low Mid/High split for a
-        // narrow Mid band.
+        // Mid/High split: 400-12000 Hz, default 3000 Hz. Unchanged in
+        // v0.2.0 (see above). Deliberately overlaps the Low/Mid range at the
+        // edges - TriptychEngine enforces a minimum runtime separation
+        // between the two rather than the ranges themselves being disjoint,
+        // so a user can still, e.g., set a fairly high Low/Mid split and a
+        // fairly low Mid/High split for a narrow Mid band.
         layout.add (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { ParamIDs::midHighSplit, 1 },
             "Mid/High Split",
@@ -118,17 +144,29 @@ namespace trpt
             juce::AudioParameterFloatAttributes().withLabel ("Hz")));
 
         //======================================================================
+        // v0.2.0 per-band defaults (docs/design-brief.md, sourced in
+        // docs/research-notes.md): Low leans moderate/peak-control, Mid
+        // leans density/knit-together, High leans peak-control with faster
+        // ballistics - replacing v0.1's single uniform default (threshold
+        // -18 dB, ratio 4:1, attack 10 ms, release 100 ms) copy-pasted three
+        // times. Attack/Release also now diverge per band
+        // (lowAttack > midAttack > highAttack; lowRelease > midRelease >
+        // highRelease - see tests/VoicingGuaranteesTests.cpp's standing
+        // invariant test).
         addBandParameters (layout,
-                            ParamIDs::lowThreshold, ParamIDs::lowRatio, ParamIDs::lowAttack, ParamIDs::lowRelease, ParamIDs::lowMakeup,
-                            "Low");
+                            ParamIDs::lowThreshold, ParamIDs::lowRatio, ParamIDs::lowKnee, ParamIDs::lowAttack, ParamIDs::lowRelease, ParamIDs::lowMakeup,
+                            "Low",
+                            -24.0f, 2.5f, 25.0f, 180.0f);
 
         addBandParameters (layout,
-                            ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
-                            "Mid");
+                            ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midKnee, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
+                            "Mid",
+                            -30.0f, 1.8f, 10.0f, 100.0f);
 
         addBandParameters (layout,
-                            ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
-                            "High");
+                            ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highKnee, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
+                            "High",
+                            -20.0f, 2.0f, 5.0f, 55.0f);
 
         //======================================================================
         // Per-band Mute/Solo (M1). See ParameterIds.h for the console-style

@@ -3,30 +3,83 @@
 #include "params/ParameterIds.h"
 #include "params/ParameterLayout.h"
 
+#include <BinaryData.h>
+
+namespace
+{
+    // The small, Triptych-specific config surface PresetManager needs (see
+    // src/presets/PresetManager.h's class docs) - everything else about the
+    // preset system is fully generic and portable to sibling plugins (see
+    // docs/preset-system-notes.md in basilica-audio/nave, the pilot
+    // implementation this was copied from).
+    basilica::presets::PresetManagerConfig makePresetManagerConfig()
+    {
+        // JucePlugin_CFBundleIdentifier expands to a raw (unquoted) token
+        // sequence, not a string literal - JUCE_STRINGIFY() is the
+        // documented way to turn it into one. This is always
+        // "com.yvesvogl.triptych" here (BUNDLE_ID in CMakeLists.txt),
+        // matching the "plugin" field baked into every presets/factory/*.json
+        // file.
+        basilica::presets::PresetManagerConfig config;
+        config.pluginId = JUCE_STRINGIFY (JucePlugin_CFBundleIdentifier);
+        config.pluginName = JucePlugin_Name;
+        config.manufacturerName = "Yves Vogl";
+        config.pluginVersion = JucePlugin_VersionString;
+        // userPresetsDirectoryOverrideForTests intentionally left
+        // default-constructed (empty) - production instances always use the
+        // real platform-standard preset location (see PresetManager.h).
+        return config;
+    }
+
+    // BinaryData symbol names are derived from the presets/factory/*.json
+    // file names passed to juce_add_binary_data() in CMakeLists.txt (dots
+    // become underscores) - this list must stay in sync with that SOURCES
+    // list. Order here only affects factory-preset iteration order before
+    // getAllPresets() re-sorts alphabetically, so it isn't otherwise
+    // significant.
+    std::vector<basilica::presets::FactoryPresetAsset> makeFactoryPresetAssets()
+    {
+        return {
+            { BinaryData::default_json, BinaryData::default_jsonSize },
+            { BinaryData::densityGlue_json, BinaryData::densityGlue_jsonSize },
+            { BinaryData::peakControl_json, BinaryData::peakControl_jsonSize },
+            { BinaryData::lowEndTighten_json, BinaryData::lowEndTighten_jsonSize },
+            { BinaryData::deHarshHighs_json, BinaryData::deHarshHighs_jsonSize },
+            { BinaryData::masteringSafetyCeiling_json, BinaryData::masteringSafetyCeiling_jsonSize },
+            { BinaryData::parallelStyleDensity_json, BinaryData::parallelStyleDensity_jsonSize },
+            { BinaryData::hardLimiterCeiling_json, BinaryData::hardLimiterCeiling_jsonSize },
+        };
+    }
+}
+
 //==============================================================================
 TriptychAudioProcessor::TriptychAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "PARAMETERS", createParameterLayout())
+      apvts (*this, nullptr, "PARAMETERS", createParameterLayout()),
+      presetManager (apvts, makePresetManagerConfig(), makeFactoryPresetAssets())
 {
     lowMidSplitHz = apvts.getRawParameterValue (ParamIDs::lowMidSplit);
     midHighSplitHz = apvts.getRawParameterValue (ParamIDs::midHighSplit);
 
     lowThresholdDb = apvts.getRawParameterValue (ParamIDs::lowThreshold);
     lowRatio = apvts.getRawParameterValue (ParamIDs::lowRatio);
+    lowKneePercent = apvts.getRawParameterValue (ParamIDs::lowKnee);
     lowAttackMs = apvts.getRawParameterValue (ParamIDs::lowAttack);
     lowReleaseMs = apvts.getRawParameterValue (ParamIDs::lowRelease);
     lowMakeupDb = apvts.getRawParameterValue (ParamIDs::lowMakeup);
 
     midThresholdDb = apvts.getRawParameterValue (ParamIDs::midThreshold);
     midRatio = apvts.getRawParameterValue (ParamIDs::midRatio);
+    midKneePercent = apvts.getRawParameterValue (ParamIDs::midKnee);
     midAttackMs = apvts.getRawParameterValue (ParamIDs::midAttack);
     midReleaseMs = apvts.getRawParameterValue (ParamIDs::midRelease);
     midMakeupDb = apvts.getRawParameterValue (ParamIDs::midMakeup);
 
     highThresholdDb = apvts.getRawParameterValue (ParamIDs::highThreshold);
     highRatio = apvts.getRawParameterValue (ParamIDs::highRatio);
+    highKneePercent = apvts.getRawParameterValue (ParamIDs::highKnee);
     highAttackMs = apvts.getRawParameterValue (ParamIDs::highAttack);
     highReleaseMs = apvts.getRawParameterValue (ParamIDs::highRelease);
     highMakeupDb = apvts.getRawParameterValue (ParamIDs::highMakeup);
@@ -47,16 +100,19 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     jassert (midHighSplitHz != nullptr);
     jassert (lowThresholdDb != nullptr);
     jassert (lowRatio != nullptr);
+    jassert (lowKneePercent != nullptr);
     jassert (lowAttackMs != nullptr);
     jassert (lowReleaseMs != nullptr);
     jassert (lowMakeupDb != nullptr);
     jassert (midThresholdDb != nullptr);
     jassert (midRatio != nullptr);
+    jassert (midKneePercent != nullptr);
     jassert (midAttackMs != nullptr);
     jassert (midReleaseMs != nullptr);
     jassert (midMakeupDb != nullptr);
     jassert (highThresholdDb != nullptr);
     jassert (highRatio != nullptr);
+    jassert (highKneePercent != nullptr);
     jassert (highAttackMs != nullptr);
     jassert (highReleaseMs != nullptr);
     jassert (highMakeupDb != nullptr);
@@ -69,6 +125,11 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     jassert (highLimiterEnabledOn != nullptr);
     jassert (highLimiterThresholdDb != nullptr);
     jassert (outputDb != nullptr);
+
+    // M2 default resolution: user "Default" preset > factory "Default"
+    // preset > the ParameterLayout defaults apvts was just constructed
+    // with above (see PresetManager::applyStartupDefault()'s docs).
+    presetManager.applyStartupDefault();
 }
 
 TriptychAudioProcessor::~TriptychAudioProcessor() = default;
@@ -136,18 +197,21 @@ void TriptychAudioProcessor::pushParametersToEngine()
 
     engine.setLowThresholdDb (lowThresholdDb->load (std::memory_order_relaxed));
     engine.setLowRatio (lowRatio->load (std::memory_order_relaxed));
+    engine.setLowKneePercent (lowKneePercent->load (std::memory_order_relaxed));
     engine.setLowAttackMs (lowAttackMs->load (std::memory_order_relaxed));
     engine.setLowReleaseMs (lowReleaseMs->load (std::memory_order_relaxed));
     engine.setLowMakeupDb (lowMakeupDb->load (std::memory_order_relaxed));
 
     engine.setMidThresholdDb (midThresholdDb->load (std::memory_order_relaxed));
     engine.setMidRatio (midRatio->load (std::memory_order_relaxed));
+    engine.setMidKneePercent (midKneePercent->load (std::memory_order_relaxed));
     engine.setMidAttackMs (midAttackMs->load (std::memory_order_relaxed));
     engine.setMidReleaseMs (midReleaseMs->load (std::memory_order_relaxed));
     engine.setMidMakeupDb (midMakeupDb->load (std::memory_order_relaxed));
 
     engine.setHighThresholdDb (highThresholdDb->load (std::memory_order_relaxed));
     engine.setHighRatio (highRatio->load (std::memory_order_relaxed));
+    engine.setHighKneePercent (highKneePercent->load (std::memory_order_relaxed));
     engine.setHighAttackMs (highAttackMs->load (std::memory_order_relaxed));
     engine.setHighReleaseMs (highReleaseMs->load (std::memory_order_relaxed));
     engine.setHighMakeupDb (highMakeupDb->load (std::memory_order_relaxed));

@@ -230,6 +230,187 @@ TEST_CASE ("BandCompressor: a signal above threshold still receives measurable g
     }
 }
 
+// v0.3.0 hybrid dynamics (docs/design-brief-v3-dynamics.md): a real,
+// envelope-integrated proof that Ratio < 1:1 genuinely boosts a signal
+// sitting above threshold, mirroring the existing "gain reduction" tests'
+// technique but measuring a positive (louder-than-input) result instead.
+TEST_CASE ("BandCompressor: ratio < 1 (upward) boosts a signal sitting above threshold", "[dsp][compressor][upward]")
+{
+    BandCompressor band;
+    band.setThresholdDb (-24.0f);
+    band.setRatio (0.4f); // upward: well below 1:1
+    band.setKneePercent (0.0f);
+    band.setAttackMs (0.5f);
+    band.setReleaseMs (50.0f);
+    band.setMakeupDb (0.0f);
+
+    const auto spec = makeTestSpec (2);
+    band.prepare (spec);
+
+    // -3 dBFS sine, comfortably above the -24 dB threshold - the same
+    // scenario the downward-ratio regression test above uses, just with an
+    // upward ratio instead.
+    juce::AudioBuffer<float> reference (2, testBlockSize);
+    TestHelpers::fillWithSine (reference, testSampleRate, testFrequencyHz, 0.7f);
+
+    juce::AudioBuffer<float> processed;
+    processed.makeCopyOf (reference);
+
+    juce::dsp::AudioBlock<float> block (processed);
+    band.process (block);
+
+    constexpr int settleSamples = testBlockSize / 2;
+
+    const auto tailRms = [] (const juce::AudioBuffer<float>& buffer)
+    {
+        double sumOfSquares = 0.0;
+        int counted = 0;
+
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+        {
+            const auto* data = buffer.getReadPointer (channel);
+
+            for (int i = settleSamples; i < buffer.getNumSamples(); ++i)
+            {
+                sumOfSquares += static_cast<double> (data[i]) * static_cast<double> (data[i]);
+                ++counted;
+            }
+        }
+
+        return counted > 0 ? std::sqrt (sumOfSquares / static_cast<double> (counted)) : 0.0;
+    };
+
+    const auto inputRms = tailRms (reference);
+    const auto outputRms = tailRms (processed);
+
+    REQUIRE (inputRms > 0.0);
+
+    const auto gainChangeDb = juce::Decibels::gainToDecibels (outputRms / inputRms);
+
+    // A genuine boost (positive dB gain change), not a cut.
+    CHECK (gainChangeDb > 1.0);
+    CHECK (TestHelpers::allSamplesFinite (processed));
+}
+
+// v0.3.0: Range clamps the gain change on real, envelope-processed audio,
+// not just in the pure static-curve math (see KneeGainComputerTests.cpp).
+// An aggressive upward ratio + deep threshold would produce far more than
+// Range's clamp unclamped; with Range engaged, the measured gain change must
+// stay within it (plus a small settling-tolerance margin).
+TEST_CASE ("BandCompressor: Range clamps gain change on real audio", "[dsp][compressor][range]")
+{
+    constexpr float rangeDb = 6.0f;
+
+    auto makeBand = [&] (bool rangeEnabled)
+    {
+        auto band = std::make_unique<BandCompressor>();
+        band->setThresholdDb (-40.0f);
+        band->setRatio (0.2f); // extreme upward
+        band->setKneePercent (0.0f);
+        band->setAttackMs (0.5f);
+        band->setReleaseMs (50.0f);
+        band->setMakeupDb (0.0f);
+        band->setRangeEnabled (rangeEnabled);
+        band->setRangeDb (rangeDb);
+
+        const auto spec = makeTestSpec (2);
+        band->prepare (spec);
+        return band;
+    };
+
+    const auto tailRms = [] (const juce::AudioBuffer<float>& buffer)
+    {
+        constexpr int settleSamples = testBlockSize / 2;
+        double sumOfSquares = 0.0;
+        int counted = 0;
+
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+        {
+            const auto* data = buffer.getReadPointer (channel);
+
+            for (int i = settleSamples; i < buffer.getNumSamples(); ++i)
+            {
+                sumOfSquares += static_cast<double> (data[i]) * static_cast<double> (data[i]);
+                ++counted;
+            }
+        }
+
+        return counted > 0 ? std::sqrt (sumOfSquares / static_cast<double> (counted)) : 0.0;
+    };
+
+    juce::AudioBuffer<float> reference (2, testBlockSize);
+    TestHelpers::fillWithSine (reference, testSampleRate, testFrequencyHz, 0.7f); // ~-3 dBFS, well above -40 dB threshold
+    const auto inputRms = tailRms (reference);
+    REQUIRE (inputRms > 0.0);
+
+    auto unclampedBand = makeBand (false);
+    juce::AudioBuffer<float> unclampedProcessed;
+    unclampedProcessed.makeCopyOf (reference);
+    juce::dsp::AudioBlock<float> unclampedBlock (unclampedProcessed);
+    unclampedBand->process (unclampedBlock);
+    const auto unclampedGainChangeDb = juce::Decibels::gainToDecibels (tailRms (unclampedProcessed) / inputRms);
+
+    // Sanity: the scenario really would exceed Range unclamped.
+    REQUIRE (unclampedGainChangeDb > rangeDb + 1.0);
+
+    auto clampedBand = makeBand (true);
+    juce::AudioBuffer<float> clampedProcessed;
+    clampedProcessed.makeCopyOf (reference);
+    juce::dsp::AudioBlock<float> clampedBlock (clampedProcessed);
+    clampedBand->process (clampedBlock);
+    const auto clampedGainChangeDb = juce::Decibels::gainToDecibels (tailRms (clampedProcessed) / inputRms);
+
+    CHECK (clampedGainChangeDb <= rangeDb + 0.5); // small settling-window tolerance
+    CHECK (TestHelpers::allSamplesFinite (clampedProcessed));
+}
+
+// Regression: a band whose Range API is never called at all must behave
+// identically to one that explicitly disables it - i.e. v0.3.0's Range
+// addition is a true no-op at its default (unclamped) state, reproducing
+// v0.2.0 bit-for-bit.
+TEST_CASE ("BandCompressor: Range untouched reproduces the same output as Range explicitly disabled (v0.2.0 regression)", "[dsp][compressor][range][regression]")
+{
+    auto makeBand = [] (bool touchRangeApi)
+    {
+        auto band = std::make_unique<BandCompressor>();
+        band->setThresholdDb (-24.0f);
+        band->setRatio (8.0f);
+        band->setKneePercent (50.0f);
+        band->setAttackMs (0.5f);
+        band->setReleaseMs (50.0f);
+        band->setMakeupDb (0.0f);
+
+        if (touchRangeApi)
+            band->setRangeEnabled (false);
+
+        const auto spec = makeTestSpec (2);
+        band->prepare (spec);
+        return band;
+    };
+
+    auto untouched = makeBand (false);
+    auto explicitlyDisabled = makeBand (true);
+
+    juce::AudioBuffer<float> bufferA (2, testBlockSize);
+    TestHelpers::fillWithSine (bufferA, testSampleRate, testFrequencyHz, 0.7f);
+    juce::AudioBuffer<float> bufferB;
+    bufferB.makeCopyOf (bufferA);
+
+    juce::dsp::AudioBlock<float> blockA (bufferA);
+    juce::dsp::AudioBlock<float> blockB (bufferB);
+    untouched->process (blockA);
+    explicitlyDisabled->process (blockB);
+
+    for (int channel = 0; channel < bufferA.getNumChannels(); ++channel)
+    {
+        const auto* dataA = bufferA.getReadPointer (channel);
+        const auto* dataB = bufferB.getReadPointer (channel);
+
+        for (int i = 0; i < testBlockSize; ++i)
+            CHECK (dataA[i] == Catch::Approx (dataB[i]).margin (1e-9f));
+    }
+}
+
 TEST_CASE ("BandCompressor: limiter ballistics track input while disabled, not frozen (issue #12)", "[dsp][compressor][limiter][regression]")
 {
     // Regression coverage for issue #12: the previous implementation toggled

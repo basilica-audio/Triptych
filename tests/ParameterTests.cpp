@@ -55,11 +55,28 @@ namespace
                            const char* makeupId)
     {
         checkFloatRange (apvts, thresholdId, -60.0f, 0.0f);
-        checkFloatRange (apvts, ratioId, 1.0f, 20.0f);
+        // v0.3.0: Ratio's lower bound widened from 1.0 (no compression) to
+        // 0.2 (Weiss DS1-MK3's documented "1:5" upward-expansion endpoint) -
+        // see docs/design-brief-v3-dynamics.md.
+        checkFloatRange (apvts, ratioId, 0.2f, 20.0f);
         checkFloatRange (apvts, kneeId, 0.0f, 100.0f);
         checkFloatRange (apvts, attackId, 0.1f, 100.0f);
         checkFloatRange (apvts, releaseId, 10.0f, 1000.0f);
         checkFloatRange (apvts, makeupId, -12.0f, 24.0f);
+    }
+
+    // Range (v0.3.0): off by default (unclamped) with a reasoned, unsourced
+    // 12 dB "if you turn it on" starting value - see ParameterLayout.cpp.
+    void checkRangeParameters (juce::AudioProcessorValueTreeState& apvts,
+                                const char* rangeEnabledId,
+                                const char* rangeId)
+    {
+        auto* enabledParam = dynamic_cast<juce::AudioParameterBool*> (apvts.getParameter (rangeEnabledId));
+        REQUIRE (enabledParam != nullptr);
+        CHECK (enabledParam->get() == false);
+
+        checkFloatRange (apvts, rangeId, 0.0f, 30.0f);
+        checkFloatDefault (apvts, rangeId, 12.0f);
     }
 
     // v0.2.0 (docs/design-brief.md): Threshold/Ratio/Attack/Release defaults
@@ -108,6 +125,7 @@ TEST_CASE ("Processor instantiates with the expected parameters", "[processor][p
             ParamIDs::lowThreshold, ParamIDs::lowRatio, ParamIDs::lowKnee, ParamIDs::lowAttack, ParamIDs::lowRelease, ParamIDs::lowMakeup,
             ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midKnee, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
             ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highKnee, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
+            ParamIDs::lowRangeEnabled, ParamIDs::lowRange, ParamIDs::midRangeEnabled, ParamIDs::midRange, ParamIDs::highRangeEnabled, ParamIDs::highRange,
             ParamIDs::lowMute, ParamIDs::lowSolo, ParamIDs::midMute, ParamIDs::midSolo, ParamIDs::highMute, ParamIDs::highSolo,
             ParamIDs::highLimiterEnabled, ParamIDs::highLimiterThreshold,
             ParamIDs::output,
@@ -117,12 +135,20 @@ TEST_CASE ("Processor instantiates with the expected parameters", "[processor][p
             CHECK (apvts.getParameter (id) != nullptr);
     }
 
-    SECTION ("total parameter count matches the v0.2.0 layout")
+    SECTION ("total parameter count matches the v0.3.0 layout")
     {
         // 2 splits + 3 bands * 6 (Threshold/Ratio/Knee/Attack/Release/Makeup
-        // - Knee added in v0.2.0) + 3 bands * 2 (Mute/Solo) + 2 (High limiter
-        // enable/threshold) + 1 output = 29.
-        CHECK (apvts.processor.getParameters().size() == 29);
+        // - Knee added in v0.2.0) + 3 bands * 2 (Range Enabled/Range - added
+        // in v0.3.0) + 3 bands * 2 (Mute/Solo) + 2 (High limiter
+        // enable/threshold) + 1 output = 35.
+        CHECK (apvts.processor.getParameters().size() == 35);
+    }
+
+    SECTION ("Range: off by default on every band, 0-30 dB range, 12 dB reasoned starting value (v0.3.0)")
+    {
+        checkRangeParameters (apvts, ParamIDs::lowRangeEnabled, ParamIDs::lowRange);
+        checkRangeParameters (apvts, ParamIDs::midRangeEnabled, ParamIDs::midRange);
+        checkRangeParameters (apvts, ParamIDs::highRangeEnabled, ParamIDs::highRange);
     }
 
     SECTION ("Mute/Solo default off for every band")

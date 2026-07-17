@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-17
+
+### Added
+
+- **Ratio extended below 1:1 (upward compression/expansion)** on every band, widening the range from **1:1-20:1** to **0.2:1-20:1**. Values below 1:1 boost signal above threshold instead of cutting it - the same closed-form transfer curve v0.2.0 already used for downward compression, evaluated on the other side of the exact `ratio == 1.0` null point instead of a different formula or a naive inversion (sourced lower bound: Weiss DS1-MK3's documented "adjustable from 1000:1 to 1:5", i.e. 0.2, for "upward expansion (for over-compressed signals)"). `ratio == 1.0` is a bit-exact null, special-cased independent of Knee/Range - not just floating-point-close. See `docs/design-brief-v3-dynamics.md`.
+- **Range** (`lowRange`/`midRange`/`highRange`, new per-band parameters, 0-30 dB, default 12 dB, plus `lowRangeEnabled`/`midRangeEnabled`/`highRangeEnabled`, default off): an optional maximum gain-change clamp, bounding a band's cut *or* boost to at most `Range` dB - the reference-class safety valve (FabFilter Pro-MB's "Range knob limits the maximum amount of applied gain change") that makes an aggressive Ratio setting, especially the new upward regime, usable instead of a runaway. Off by default, routing `KneeGainComputer` to an internal `unlimitedRangeDb` (500 dB) sentinel comfortably outside any realistic single-pass operating range, so a band whose Range API is never touched reproduces v0.2.0's behaviour exactly.
+- Editor: a `Range On` toggle + `Range` knob added to every band's control column.
+- Two factory presets extended (the other six unchanged) to showcase the new capability: **Density Glue**'s Mid band now uses genuine upward compression (0.7:1, was 1.2:1 downward) with Range engaged on all three bands at 8 dB; **Parallel-Style Density** pushes all three bands to upward compression (0.6:1, was ~1.15:1 downward) with Range engaged at 10 dB, without which its deep (-38 dB) threshold combined with a strongly upward ratio could push full-scale peaks far louder than musically useful. See `docs/presets.md`.
+- Test suite broadened from 73 to 84 test cases: a measurable proof of the upward-compression transfer curve against its closed-form expected dB value, Range-clamp assertions at both the pure-math and real-audio levels, a bit-exact `ratio == 1.0` null test, a v0.2.0-to-v0.3.0 state migration-tolerance test, a dedicated "fresh v0.3.0 instance is bit-identical to v0.2.0 defaults" test spanning parameter values/Range neutrality/processed audio, and NaN/Inf coverage extended to the new Ratio floor and Range extremes.
+
+### Changed
+
+- `KneeGainComputer::computeStaticGainReductionDb()`/`computeGainLinear()` gained an optional trailing `rangeDb` parameter (default: the unbounded sentinel, preserving every existing call site's behaviour unchanged) and no longer treat `ratio <= 1.0` as a forced bypass - only `ratio == 1.0` exactly is a null point now.
+- `docs/manual.md`, `docs/presets.md`, and `docs/architecture.md` updated for the Ratio range widening and the new Range parameter; `docs/design-brief-v3-dynamics.md` added, and `docs/research-notes.md` gained a v0.3.0 addendum (the sourced rationale, and the explicit accounting of what is and isn't parity with the FabFilter Pro-MB reference point).
+
+### Deferred
+
+- **Downward expansion (gating)** was considered and deliberately left unimplemented - a clean per-band gate needs a second, independent threshold that the existing single-threshold Ratio/Range model doesn't cleanly accommodate. **Per-band Mid/Side processing** (named as a v0.2.0 gap) remains open and now has its own tracking issue. See `docs/architecture.md`'s "Deferred from v0.3.0" section.
+
 ## [0.2.0] - 2026-07-16
 
 ### Added

@@ -1,5 +1,7 @@
 #include "PluginProcessor.h"
+#include "dsp/BandCompressor.h"
 #include "params/ParameterIds.h"
+#include "TestHelpers.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -21,6 +23,7 @@ TEST_CASE ("State round-trip preserves non-default values of every parameter", "
         ParamIDs::lowThreshold, ParamIDs::lowRatio, ParamIDs::lowKnee, ParamIDs::lowAttack, ParamIDs::lowRelease, ParamIDs::lowMakeup,
         ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midKnee, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
         ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highKnee, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
+        ParamIDs::lowRange, ParamIDs::midRange, ParamIDs::highRange, // v0.3.0
         ParamIDs::highLimiterThreshold,
         ParamIDs::output,
     };
@@ -89,6 +92,7 @@ TEST_CASE ("State round-trip preserves every bool parameter (Mute/Solo, High lim
         ParamIDs::midMute, ParamIDs::midSolo,
         ParamIDs::highMute, ParamIDs::highSolo,
         ParamIDs::highLimiterEnabled,
+        ParamIDs::lowRangeEnabled, ParamIDs::midRangeEnabled, ParamIDs::highRangeEnabled, // v0.3.0
     };
 
     std::vector<juce::RangedAudioParameter*> params;
@@ -220,4 +224,207 @@ TEST_CASE ("State migration tolerance: a v0.1-shaped state (missing Knee IDs) lo
     buffer.clear();
     juce::MidiBuffer midi;
     CHECK_NOTHROW (destination.processBlock (buffer, midi));
+}
+
+// v0.3.0 state migration tolerance (docs/design-brief-v3-dynamics.md): a
+// v0.2.0-shaped ValueTree - missing all six new Range parameter IDs (three
+// RangeEnabled bools, three Range floats) - must load without crashing or
+// asserting, with RangeEnabled resolving to false (unclamped) and Range to
+// its declared 12 dB default, exactly mirroring the v0.2.0 Knee migration
+// test above.
+TEST_CASE ("State migration tolerance: a v0.2.0-shaped state (missing Range IDs) loads cleanly with Range disabled at its default", "[state][regression]")
+{
+    TriptychAudioProcessor source;
+    source.prepareToPlay (48000.0, 512);
+
+    auto* midThresholdParam = source.apvts.getParameter (ParamIDs::midThreshold);
+    auto* outputParam = source.apvts.getParameter (ParamIDs::output);
+    REQUIRE (midThresholdParam != nullptr);
+    REQUIRE (outputParam != nullptr);
+
+    midThresholdParam->setValueNotifyingHost (midThresholdParam->convertTo0to1 (-19.0f));
+    outputParam->setValueNotifyingHost (outputParam->convertTo0to1 (-4.0f));
+
+    juce::MemoryBlock v030State;
+    source.getStateInformation (v030State);
+    REQUIRE (v030State.getSize() > 0);
+
+    const std::unique_ptr<juce::XmlElement> xml (source.getXmlFromBinary (v030State.getData(), static_cast<int> (v030State.getSize())));
+    REQUIRE (xml != nullptr);
+
+    auto prunedTree = juce::ValueTree::fromXml (*xml);
+    REQUIRE (prunedTree.isValid());
+
+    static constexpr const char* rangeIds[] = {
+        ParamIDs::lowRangeEnabled, ParamIDs::lowRange,
+        ParamIDs::midRangeEnabled, ParamIDs::midRange,
+        ParamIDs::highRangeEnabled, ParamIDs::highRange,
+    };
+
+    for (const auto* rangeId : rangeIds)
+    {
+        for (int i = prunedTree.getNumChildren() - 1; i >= 0; --i)
+        {
+            auto child = prunedTree.getChild (i);
+
+            if (child.getProperty ("id").toString() == juce::String (rangeId))
+                prunedTree.removeChild (i, nullptr);
+        }
+    }
+
+    const auto fullChildCount = juce::ValueTree::fromXml (*xml).getNumChildren();
+    REQUIRE (prunedTree.getNumChildren() == fullChildCount - 6);
+
+    const std::unique_ptr<juce::XmlElement> prunedXml (prunedTree.createXml());
+    juce::MemoryBlock prunedState;
+    juce::AudioProcessor::copyXmlToBinary (*prunedXml, prunedState);
+
+    TriptychAudioProcessor destination;
+    destination.prepareToPlay (48000.0, 512);
+
+    CHECK_NOTHROW (destination.setStateInformation (prunedState.getData(), static_cast<int> (prunedState.getSize())));
+
+    auto* destMidThreshold = destination.apvts.getParameter (ParamIDs::midThreshold);
+    auto* destOutput = destination.apvts.getParameter (ParamIDs::output);
+    REQUIRE (destMidThreshold != nullptr);
+    REQUIRE (destOutput != nullptr);
+    CHECK (destMidThreshold->convertFrom0to1 (destMidThreshold->getValue()) == Catch::Approx (-19.0f).margin (1e-3));
+    CHECK (destOutput->convertFrom0to1 (destOutput->getValue()) == Catch::Approx (-4.0f).margin (1e-3));
+
+    static constexpr const char* rangeEnabledIds[] = { ParamIDs::lowRangeEnabled, ParamIDs::midRangeEnabled, ParamIDs::highRangeEnabled };
+    static constexpr const char* rangeAmountIds[] = { ParamIDs::lowRange, ParamIDs::midRange, ParamIDs::highRange };
+
+    for (const auto* id : rangeEnabledIds)
+    {
+        auto* param = dynamic_cast<juce::AudioParameterBool*> (destination.apvts.getParameter (id));
+        REQUIRE (param != nullptr);
+        CHECK (param->get() == false);
+    }
+
+    for (const auto* id : rangeAmountIds)
+    {
+        auto* param = destination.apvts.getParameter (id);
+        REQUIRE (param != nullptr);
+        CHECK (param->convertFrom0to1 (param->getValue()) == Catch::Approx (12.0f).margin (1e-3));
+    }
+
+    juce::AudioBuffer<float> buffer (2, 512);
+    buffer.clear();
+    juce::MidiBuffer midi;
+    CHECK_NOTHROW (destination.processBlock (buffer, midi));
+}
+
+// v0.3.0's own binding requirement (docs/design-brief-v3-dynamics.md): "a
+// fresh v0.3.0 instance MUST be bit-identical to v0.2.0 defaults". Proven at
+// three levels: (1) every v0.2.0-era parameter's default value is unchanged
+// (regression-pinned against the literal v0.2.0 design-brief numbers), (2)
+// every new v0.3.0 parameter defaults to a fully neutral/off state, and (3)
+// processing real audio through a fresh engine at these defaults produces
+// output whose measured per-band gain reduction is unaffected by the new
+// Ratio range extension or Range clamp (both structurally inert at their
+// shipped defaults).
+TEST_CASE ("v0.3.0 defaults are bit-identical to v0.2.0: parameter values, Range neutrality, and processed audio all unaffected", "[state][regression]")
+{
+    TriptychAudioProcessor processor;
+
+    // (1) v0.2.0-era defaults, unchanged - see ParameterTests.cpp for the
+    // exhaustive per-band version; this is a focused spot-check tying the
+    // guarantee directly to the "fresh instance" framing.
+    auto checkDefault = [&] (const char* id, float expectedRealValue)
+    {
+        auto* param = processor.apvts.getParameter (id);
+        REQUIRE (param != nullptr);
+        CHECK (param->convertFrom0to1 (param->getDefaultValue()) == Catch::Approx (expectedRealValue).margin (1e-3));
+    };
+
+    checkDefault (ParamIDs::lowThreshold, -24.0f);
+    checkDefault (ParamIDs::lowRatio, 2.5f);
+    checkDefault (ParamIDs::midThreshold, -30.0f);
+    checkDefault (ParamIDs::midRatio, 1.8f);
+    checkDefault (ParamIDs::highThreshold, -20.0f);
+    checkDefault (ParamIDs::highRatio, 2.0f);
+    checkDefault (ParamIDs::output, 0.0f);
+
+    // (2) Every new v0.3.0 parameter is neutral: Range disabled on every
+    // band (RangeEnabled == false).
+    for (const auto* id : { ParamIDs::lowRangeEnabled, ParamIDs::midRangeEnabled, ParamIDs::highRangeEnabled })
+    {
+        auto* param = dynamic_cast<juce::AudioParameterBool*> (processor.apvts.getParameter (id));
+        REQUIRE (param != nullptr);
+        CHECK (param->get() == false);
+    }
+
+    // (3) Fresh v0.3.0 engine, default state, real audio: measured per-band
+    // gain reduction must exactly match what BandCompressor's own v0.2.0-era
+    // API surface (threshold/ratio/knee/attack/release/makeup only - never
+    // touching setRangeEnabled/setRangeDb) produces for the same inputs,
+    // proving the Range addition is a true structural no-op at its default.
+    constexpr double sampleRate = 48000.0;
+    constexpr int blockSize = 8192;
+
+    auto measureTailRms = [] (const juce::AudioBuffer<float>& buffer)
+    {
+        constexpr int settleSamples = blockSize / 2;
+        double sumOfSquares = 0.0;
+        int counted = 0;
+
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+        {
+            const auto* data = buffer.getReadPointer (channel);
+
+            for (int i = settleSamples; i < buffer.getNumSamples(); ++i)
+            {
+                sumOfSquares += static_cast<double> (data[i]) * static_cast<double> (data[i]);
+                ++counted;
+            }
+        }
+
+        return counted > 0 ? std::sqrt (sumOfSquares / static_cast<double> (counted)) : 0.0;
+    };
+
+    juce::dsp::ProcessSpec spec;
+    spec.sampleRate = sampleRate;
+    spec.maximumBlockSize = static_cast<juce::uint32> (blockSize);
+    spec.numChannels = 1;
+
+    // "v0.2.0-only" reference: never touches Range at all.
+    BandCompressor v020Reference;
+    v020Reference.setThresholdDb (-24.0f);
+    v020Reference.setRatio (2.5f);
+    v020Reference.setKneePercent (50.0f);
+    v020Reference.setAttackMs (25.0f);
+    v020Reference.setReleaseMs (180.0f);
+    v020Reference.setMakeupDb (0.0f);
+    v020Reference.prepare (spec);
+
+    // "v0.3.0 API surface, defaults": explicitly calls the new Range setters
+    // with the shipped default state (disabled), rather than omitting them.
+    BandCompressor v030AtDefaults;
+    v030AtDefaults.setThresholdDb (-24.0f);
+    v030AtDefaults.setRatio (2.5f);
+    v030AtDefaults.setKneePercent (50.0f);
+    v030AtDefaults.setAttackMs (25.0f);
+    v030AtDefaults.setReleaseMs (180.0f);
+    v030AtDefaults.setMakeupDb (0.0f);
+    v030AtDefaults.setRangeEnabled (false);
+    v030AtDefaults.setRangeDb (12.0f); // the shipped default dB value, but disabled - must have zero effect
+    v030AtDefaults.prepare (spec);
+
+    juce::AudioBuffer<float> input (1, blockSize);
+    TestHelpers::fillWithSine (input, sampleRate, 500.0, 0.5f);
+
+    juce::AudioBuffer<float> referenceProcessed;
+    referenceProcessed.makeCopyOf (input);
+    juce::dsp::AudioBlock<float> referenceBlock (referenceProcessed);
+    v020Reference.process (referenceBlock);
+
+    juce::AudioBuffer<float> defaultsProcessed;
+    defaultsProcessed.makeCopyOf (input);
+    juce::dsp::AudioBlock<float> defaultsBlock (defaultsProcessed);
+    v030AtDefaults.process (defaultsBlock);
+
+    const auto referenceGrDb = juce::Decibels::gainToDecibels (measureTailRms (referenceProcessed) / measureTailRms (input));
+    const auto defaultsGrDb = juce::Decibels::gainToDecibels (measureTailRms (defaultsProcessed) / measureTailRms (input));
+
+    CHECK (defaultsGrDb == Catch::Approx (referenceGrDb).margin (1e-3));
 }

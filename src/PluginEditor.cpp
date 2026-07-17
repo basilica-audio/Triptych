@@ -21,9 +21,10 @@ namespace
     constexpr int editorWidth = margin * 2 + numColumns * knobSize + (numColumns + 1) * margin;
 
     // Preset bar + top strip + band labels + Mute/Solo row + band knob rows
+    // + each band's own Range enable-toggle row and Range-knob row (v0.3.0)
     // + the High-band limiter option's own toggle row and threshold-knob row.
     constexpr int editorHeight = margin + presetBarHeight + margin + rowHeight + margin + bandLabelHeight + toggleRowHeight
-                                  + numBandKnobRows * rowHeight + margin + toggleRowHeight + rowHeight + margin;
+                                  + numBandKnobRows * rowHeight + toggleRowHeight + rowHeight + margin + toggleRowHeight + rowHeight + margin;
 
     // M2 i18n frame (.scaffold/specs/preset-system-m2.md): selects German
     // (resources/i18n/de.txt) or falls through to English, once, at editor
@@ -66,6 +67,8 @@ TriptychAudioProcessorEditor::TriptychAudioProcessorEditor (TriptychAudioProcess
     configureKnob (lowControls.attack, ParamIDs::lowAttack, "Attack");
     configureKnob (lowControls.release, ParamIDs::lowRelease, "Release");
     configureKnob (lowControls.makeup, ParamIDs::lowMakeup, "Makeup");
+    configureToggle (lowControls.rangeEnabled, ParamIDs::lowRangeEnabled, "Range On");
+    configureKnob (lowControls.range, ParamIDs::lowRange, "Range");
 
     configureToggle (midControls.mute, ParamIDs::midMute, "Mute");
     configureToggle (midControls.solo, ParamIDs::midSolo, "Solo");
@@ -75,6 +78,8 @@ TriptychAudioProcessorEditor::TriptychAudioProcessorEditor (TriptychAudioProcess
     configureKnob (midControls.attack, ParamIDs::midAttack, "Attack");
     configureKnob (midControls.release, ParamIDs::midRelease, "Release");
     configureKnob (midControls.makeup, ParamIDs::midMakeup, "Makeup");
+    configureToggle (midControls.rangeEnabled, ParamIDs::midRangeEnabled, "Range On");
+    configureKnob (midControls.range, ParamIDs::midRange, "Range");
 
     configureToggle (highControls.mute, ParamIDs::highMute, "Mute");
     configureToggle (highControls.solo, ParamIDs::highSolo, "Solo");
@@ -84,6 +89,8 @@ TriptychAudioProcessorEditor::TriptychAudioProcessorEditor (TriptychAudioProcess
     configureKnob (highControls.attack, ParamIDs::highAttack, "Attack");
     configureKnob (highControls.release, ParamIDs::highRelease, "Release");
     configureKnob (highControls.makeup, ParamIDs::highMakeup, "Makeup");
+    configureToggle (highControls.rangeEnabled, ParamIDs::highRangeEnabled, "Range On");
+    configureKnob (highControls.range, ParamIDs::highRange, "Range");
 
     configureToggle (highLimiterEnabledToggle, ParamIDs::highLimiterEnabled, "Limiter");
     configureKnob (highLimiterThresholdKnob, ParamIDs::highLimiterThreshold, "Lim. Thresh");
@@ -184,8 +191,18 @@ void TriptychAudioProcessorEditor::resized()
     for (auto* knob : { &highControls.threshold, &highControls.ratio, &highControls.knee, &highControls.attack, &highControls.release, &highControls.makeup })
         knob->slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
 
-    // High-band limiter option (M1): High column only, below its six
+    // Range enable + amount (v0.3.0): every band, directly below its six
     // compression knobs.
+    lowControls.rangeEnabled.button.setBounds (lowColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    lowControls.range.slider.setBounds (lowColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    midControls.rangeEnabled.button.setBounds (midColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    midControls.range.slider.setBounds (midColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    highControls.rangeEnabled.button.setBounds (highColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    highControls.range.slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    // High-band limiter option (M1): High column only, below its Range row.
     highLimiterEnabledToggle.button.setBounds (highColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
     highLimiterThresholdKnob.slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
 }

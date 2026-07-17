@@ -20,6 +20,16 @@ namespace
             { return juce::mapFromLog10 (value, start, end); });
     }
 
+    // Ratio's lower bound (v0.3.0 / docs/design-brief-v3-dynamics.md): 0.2
+    // (i.e. "1:5") is the Weiss DS1-MK3 manual's own documented lower
+    // endpoint ("adjustable from 1000:1 to 1:5") for what it calls "upward
+    // expansion (for over-compressed signals)" - see docs/research-notes.md.
+    // Values below 1:1 boost signal above threshold instead of cutting it,
+    // continuously tapering through the exact null at 1:1 (see
+    // KneeGainComputer.h). The upper bound (20:1) is unchanged from v0.2.0.
+    constexpr float ratioMin = 0.2f;
+    constexpr float ratioMax = 20.0f;
+
     // Adds the six per-band parameters (Threshold, Ratio, Knee, Attack,
     // Release, Makeup) shared *structurally* by the Low/Mid/High bands, so
     // the ranges/units live in exactly one place - but per docs/design-brief.md
@@ -50,11 +60,19 @@ namespace
             thresholdDefaultDb,
             juce::AudioParameterFloatAttributes().withLabel ("dB")));
 
-        // Ratio: 1:1 (no compression) to 20:1, per-band default.
+        // Ratio: 0.2:1 (upward, v0.3.0) through 1:1 (no processing) to 20:1
+        // (downward), per-band default. Skewed so 1:1 - the exact
+        // boundary between upward and downward processing - sits at the
+        // knob's centre travel position rather than being crowded toward
+        // one end. See ratioMin's own doc comment above for the sourced
+        // lower bound.
+        auto ratioRange = juce::NormalisableRange<float> (ratioMin, ratioMax, 0.01f);
+        ratioRange.setSkewForCentre (1.0f);
+
         layout.add (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { ratioId, 1 },
             labelPrefix + " Ratio",
-            juce::NormalisableRange<float> (1.0f, 20.0f, 0.01f),
+            ratioRange,
             ratioDefault,
             juce::AudioParameterFloatAttributes().withLabel (":1")));
 
@@ -109,6 +127,31 @@ namespace
 
         layout.add (std::make_unique<juce::AudioParameterBool> (
             juce::ParameterID { soloId, 1 }, labelPrefix + " Solo", false));
+    }
+
+    // Range (v0.3.0 / docs/design-brief-v3-dynamics.md): a band's maximum
+    // gain-change clamp, off by default so adding these parameters never
+    // changes existing (v0.2.0) default behaviour - see
+    // src/dsp/KneeGainComputer.h/BandCompressor.h. The 0-30 dB range and its
+    // 12 dB "if you turn it on" default are a reasoned engineering choice
+    // (the reference class - FabFilter Pro-MB's Range knob, Waves C6's Range
+    // paradigm - documents the *concept* of a maximum-gain-change clamp but
+    // not a specific numeric range; see docs/research-notes.md's v0.3.0
+    // addendum), not sourced to a specific manual number.
+    void addRangeParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout,
+                              const char* rangeEnabledId,
+                              const char* rangeId,
+                              const juce::String& labelPrefix)
+    {
+        layout.add (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { rangeEnabledId, 1 }, labelPrefix + " Range Enabled", false));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { rangeId, 1 },
+            labelPrefix + " Range",
+            juce::NormalisableRange<float> (0.0f, 30.0f, 0.01f),
+            12.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("dB")));
     }
 }
 
@@ -167,6 +210,12 @@ namespace trpt
                             ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highKnee, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
                             "High",
                             -20.0f, 2.0f, 5.0f, 55.0f);
+
+        //======================================================================
+        // Range (v0.3.0). See addRangeParameters()'s doc comment above.
+        addRangeParameters (layout, ParamIDs::lowRangeEnabled, ParamIDs::lowRange, "Low");
+        addRangeParameters (layout, ParamIDs::midRangeEnabled, ParamIDs::midRange, "Mid");
+        addRangeParameters (layout, ParamIDs::highRangeEnabled, ParamIDs::highRange, "High");
 
         //======================================================================
         // Per-band Mute/Solo (M1). See ParameterIds.h for the console-style

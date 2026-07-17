@@ -74,6 +74,8 @@ private:
     std::atomic<float>* lowAttackMs = nullptr;
     std::atomic<float>* lowReleaseMs = nullptr;
     std::atomic<float>* lowMakeupDb = nullptr;
+    std::atomic<float>* lowRangeEnabledOn = nullptr;
+    std::atomic<float>* lowRangeDb = nullptr;
 
     std::atomic<float>* midThresholdDb = nullptr;
     std::atomic<float>* midRatio = nullptr;
@@ -81,6 +83,8 @@ private:
     std::atomic<float>* midAttackMs = nullptr;
     std::atomic<float>* midReleaseMs = nullptr;
     std::atomic<float>* midMakeupDb = nullptr;
+    std::atomic<float>* midRangeEnabledOn = nullptr;
+    std::atomic<float>* midRangeDb = nullptr;
 
     std::atomic<float>* highThresholdDb = nullptr;
     std::atomic<float>* highRatio = nullptr;
@@ -88,6 +92,8 @@ private:
     std::atomic<float>* highAttackMs = nullptr;
     std::atomic<float>* highReleaseMs = nullptr;
     std::atomic<float>* highMakeupDb = nullptr;
+    std::atomic<float>* highRangeEnabledOn = nullptr;
+    std::atomic<float>* highRangeDb = nullptr;
 
     // Per-band Mute/Solo (M1). AudioParameterBool's raw APVTS value is
     // 0.0f/1.0f, thresholded at 0.5f in pushParametersToEngine() - the same

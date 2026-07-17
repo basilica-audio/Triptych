@@ -302,6 +302,7 @@ TEST_CASE ("PresetManager: factory preset content is plausible (Default is Init 
     static constexpr const char* thresholdIds[] = { ParamIDs::lowThreshold, ParamIDs::midThreshold, ParamIDs::highThreshold };
     static constexpr const char* ratioIds[] = { ParamIDs::lowRatio, ParamIDs::midRatio, ParamIDs::highRatio };
     static constexpr const char* kneeIds[] = { ParamIDs::lowKnee, ParamIDs::midKnee, ParamIDs::highKnee };
+    static constexpr const char* rangeIds[] = { ParamIDs::lowRange, ParamIDs::midRange, ParamIDs::highRange };
 
     for (auto& entry : all)
     {
@@ -319,7 +320,9 @@ TEST_CASE ("PresetManager: factory preset content is plausible (Default is Init 
 
         for (const auto* id : ratioIds)
         {
-            CHECK (getParam (processor, id) >= 1.0f);
+            // v0.3.0: lower bound widened to 0.2 (upward) - see
+            // docs/design-brief-v3-dynamics.md.
+            CHECK (getParam (processor, id) >= 0.2f);
             CHECK (getParam (processor, id) <= 20.0f);
         }
 
@@ -327,6 +330,12 @@ TEST_CASE ("PresetManager: factory preset content is plausible (Default is Init 
         {
             CHECK (getParam (processor, id) >= 0.0f);
             CHECK (getParam (processor, id) <= 100.0f);
+        }
+
+        for (const auto* id : rangeIds)
+        {
+            CHECK (getParam (processor, id) >= 0.0f);
+            CHECK (getParam (processor, id) <= 30.0f);
         }
 
         CHECK (getParam (processor, ParamIDs::output) >= -24.0f);

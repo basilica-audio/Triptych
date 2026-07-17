@@ -52,6 +52,21 @@ namespace ParamIDs
     inline constexpr auto midKnee = "midKnee";
     inline constexpr auto highKnee = "highKnee";
 
+    // Range (v0.3.0 / docs/design-brief-v3-dynamics.md): per-band maximum
+    // gain-change clamp, in dB, applying to BOTH downward (cut) and upward
+    // (boost - see lowRatio et al.'s v0.3.0 extended range below 1:1)
+    // processing - the reference-class safety valve that makes aggressive
+    // Ratio settings usable without runaway gain. `xRangeEnabled` defaults
+    // to off so a fresh v0.3.0 instance and v0.2.0-shaped session/preset
+    // imports both resolve to the same fully unclamped behaviour - see
+    // tests/StateTests.cpp's v0.2.0 migration-tolerance test.
+    inline constexpr auto lowRangeEnabled = "lowRangeEnabled";
+    inline constexpr auto lowRange = "lowRange";
+    inline constexpr auto midRangeEnabled = "midRangeEnabled";
+    inline constexpr auto midRange = "midRange";
+    inline constexpr auto highRangeEnabled = "highRangeEnabled";
+    inline constexpr auto highRange = "highRange";
+
     // Per-band Mute/Solo (M1): applied at the summing stage in
     // TriptychEngine, not inside BandCompressor itself - muting/soloing is a
     // mix-bus decision, not part of a band's own dynamics processing.

@@ -29,18 +29,27 @@
 // follower's own behaviour at all.
 //
 // Bypass identity: with ratio == 1.0, KneeGainComputer::computeGainLinear()
-// returns 1.0 unconditionally (independent of threshold/envelope/knee) - see
-// KneeGainComputer.h/.cpp. Combined with makeup == 0 dB (unity Gain),
+// returns 1.0 unconditionally (independent of threshold/envelope/knee/range)
+// - see KneeGainComputer.h/.cpp. Combined with makeup == 0 dB (unity Gain),
 // setRatio(1.0f) + setMakeupDb(0.0f) makes a band a true identity
-// pass-through regardless of Knee, which is what TriptychEngine's flat-sum
-// null test relies on (tests/EngineTests.cpp).
+// pass-through regardless of Knee/Range, which is what TriptychEngine's
+// flat-sum null test relies on (tests/EngineTests.cpp).
 //
-// Knee null test (docs/design-brief.md guarantee #1): at Knee == 0%,
-// KneeGainComputer::computeGainLinear() takes a dedicated linear-domain fast
-// path that reproduces juce::dsp::Compressor::processSample()'s exact
-// hard-knee formula bit-for-bit (see KneeGainComputer.h/.cpp) - the v0.1
-// bypass-identity and gain-reduction tests are preserved unchanged at that
-// extreme (tests/BandCompressorTests.cpp).
+// Knee null test (docs/design-brief.md guarantee #1): at Knee == 0% and
+// Range disabled, KneeGainComputer::computeGainLinear() takes a dedicated
+// linear-domain fast path that reproduces juce::dsp::Compressor::
+// processSample()'s exact hard-knee formula bit-for-bit (see
+// KneeGainComputer.h/.cpp) - the v0.1 bypass-identity and gain-reduction
+// tests are preserved unchanged at that extreme (tests/BandCompressorTests.cpp).
+//
+// v0.3.0 hybrid dynamics (docs/design-brief-v3-dynamics.md): Ratio now
+// spans 0.2:1-20:1 (previously 1:1-20:1) - values below 1:1 are upward
+// compression/expansion (signal above threshold is boosted, not cut),
+// continuously tapering through ratio == 1.0's exact null point (still a
+// bit-exact bypass, unaffected by this range extension). An optional
+// per-band Range clamp (`setRangeEnabled`/`setRangeDb`) limits the maximum
+// gain change in either direction; disabled by default so a band with
+// Range never touched behaves identically to v0.2.0.
 class BandCompressor
 {
 public:
@@ -64,6 +73,15 @@ public:
     void setAttackMs (float newAttackMs);
     void setReleaseMs (float newReleaseMs);
     void setMakeupDb (float newMakeupDb);
+
+    // Range (v0.3.0): an optional maximum gain-change clamp in dB, applied
+    // to both downward (cut) and upward (boost) processing - see
+    // KneeGainComputer.h. Off by default (the smoothed target starts at
+    // KneeGainComputer's unlimitedRangeDb sentinel), so a band whose Range
+    // API is never called at all reproduces v0.2.0's unclamped behaviour
+    // exactly.
+    void setRangeEnabled (bool shouldBeEnabled) noexcept;
+    void setRangeDb (float newRangeDb);
 
     // Optional post-stage brickwall limiter (M1's "high-band limiter
     // option"; the type is generic so any band could opt in, though only
@@ -129,6 +147,16 @@ private:
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> ratioSmoothed;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> kneeSmoothed;
 
+    // Range (v0.3.0): the smoothed value is the *effective* clamp bound fed
+    // straight to KneeGainComputer - when Range is disabled, its target is
+    // KneeGainComputer::unlimitedRangeDb (not a separate "disabled" flag),
+    // so toggling Range on/off ramps the clamp boundary smoothly over
+    // smoothingTimeSeconds instead of producing a hard discontinuity, the
+    // same real-time-safe approach used for the High-band limiter's
+    // continuously-tracked ballistics (see setLimiterEnabled's doc comment
+    // below).
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> rangeSmoothed;
+
     // Last commanded values (ParameterLayout defaults until a setter is
     // called), re-applied to the smoothers on every prepare() so re-prepare
     // (sample-rate change, etc.) never resets a live parameter back to a
@@ -141,6 +169,12 @@ private:
     float lastThresholdDb = -18.0f;
     float lastRatio = 4.0f;
     float lastKneePercent = 50.0f;
+
+    // Range (v0.3.0): tracked independently of the smoothed *effective*
+    // bound above, since the effective target depends on both of these
+    // (see setRangeEnabled()/setRangeDb()'s definitions).
+    bool rangeEnabled = false;
+    float lastRangeDb = 12.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BandCompressor)
 };

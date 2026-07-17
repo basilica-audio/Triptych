@@ -40,7 +40,8 @@ private:
     };
 
     // One band's Mute/Solo pair plus its six compression knobs (Knee added
-    // in v0.2.0), in signal-flow order.
+    // in v0.2.0) and Range enable/amount (added in v0.3.0), in signal-flow
+    // order.
     struct BandControls
     {
         Toggle mute;
@@ -51,6 +52,8 @@ private:
         Knob attack;
         Knob release;
         Knob makeup;
+        Toggle rangeEnabled;
+        Knob range;
     };
 
     void configureKnob (Knob& knob, const juce::String& parameterId, const juce::String& labelText);

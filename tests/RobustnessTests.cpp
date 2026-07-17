@@ -37,6 +37,17 @@ namespace
         setParam (processor, ParamIDs::highRelease, releaseMs);
         setParam (processor, ParamIDs::highMakeup, makeupDb);
     }
+
+    // v0.3.0: Range Enabled + Range amount, every band.
+    void setAllBandRangeParams (TriptychAudioProcessor& processor, bool rangeEnabled, float rangeDb)
+    {
+        setParam (processor, ParamIDs::lowRangeEnabled, rangeEnabled ? 1.0f : 0.0f);
+        setParam (processor, ParamIDs::lowRange, rangeDb);
+        setParam (processor, ParamIDs::midRangeEnabled, rangeEnabled ? 1.0f : 0.0f);
+        setParam (processor, ParamIDs::midRange, rangeDb);
+        setParam (processor, ParamIDs::highRangeEnabled, rangeEnabled ? 1.0f : 0.0f);
+        setParam (processor, ParamIDs::highRange, rangeDb);
+    }
 }
 
 TEST_CASE ("Silence produces silence (and no NaN/Inf)", "[robustness]")
@@ -131,13 +142,74 @@ TEST_CASE ("Extreme parameter values at both range edges produce no NaN/Inf", "[
         setParam (processor, ParamIDs::midHighSplit, useMinimum ? 400.0f : 12000.0f);
         setAllBandParams (processor,
                            useMinimum ? -60.0f : 0.0f,
-                           useMinimum ? 1.0f : 20.0f,
+                           // v0.3.0: Ratio's minimum is now 0.2 (upward),
+                           // widened from 1.0 - see
+                           // docs/design-brief-v3-dynamics.md.
+                           useMinimum ? 0.2f : 20.0f,
                            useMinimum ? 0.1f : 100.0f,
                            useMinimum ? 10.0f : 1000.0f,
                            useMinimum ? -12.0f : 24.0f);
+        setAllBandRangeParams (processor, true, useMinimum ? 0.0f : 30.0f);
         setParam (processor, ParamIDs::output, useMinimum ? -24.0f : 24.0f);
 
         TestHelpers::fillWithSine (buffer, 44100.0, 440.0, 0.8f);
+
+        CHECK_NOTHROW (processor.processBlock (buffer, midi));
+        CHECK (TestHelpers::allSamplesFinite (buffer));
+    }
+}
+
+TEST_CASE ("Extreme upward ratio (0.2) with deep threshold and Range disabled produces no NaN/Inf", "[robustness]")
+{
+    // v0.3.0: the specific scenario that would blow up unclamped (see
+    // KneeGainComputerTests.cpp's Range-clamp test) - deepest threshold,
+    // most extreme upward ratio, Range explicitly left disabled, full-scale
+    // input. A *fresh* sine is supplied every block (matching how a real
+    // host actually calls processBlock() - always with a new slice of
+    // program material, never the plugin's own prior output fed back in as
+    // if it were new input), the same convention the "Rapid parameter
+    // automation" test below uses. Deliberately reusing an unrefreshed
+    // buffer across many calls instead would model a literal audio feedback
+    // loop (the host routing this band's own output back into itself) -
+    // for an upward (ratio < 1) band that is a genuine, expected positive-
+    // feedback divergence (each pass's already-amplified output becomes the
+    // next pass's input, which an upward transfer curve amplifies further
+    // still), no different in kind from a delay-with-feedback-over-100% or
+    // a self-oscillating resonant filter; not a property this per-block
+    // static transfer curve is responsible for damping.
+    TriptychAudioProcessor processor;
+    processor.prepareToPlay (48000.0, 512);
+
+    setAllBandParams (processor, -60.0f, 0.2f, 0.1f, 10.0f, 0.0f);
+    setAllBandRangeParams (processor, false, 30.0f); // disabled - the sentinel path is what's under test
+    setParam (processor, ParamIDs::output, 0.0f);
+
+    juce::MidiBuffer midi;
+
+    for (int i = 0; i < 8; ++i)
+    {
+        juce::AudioBuffer<float> buffer (2, 512);
+        TestHelpers::fillWithSine (buffer, 48000.0, 1000.0, 1.0f);
+
+        CHECK_NOTHROW (processor.processBlock (buffer, midi));
+        CHECK (TestHelpers::allSamplesFinite (buffer));
+    }
+}
+
+TEST_CASE ("Range enabled at its tightest (0 dB) and loosest (30 dB) settings produces no NaN/Inf", "[robustness]")
+{
+    TriptychAudioProcessor processor;
+    processor.prepareToPlay (48000.0, 512);
+
+    juce::AudioBuffer<float> buffer (2, 512);
+    juce::MidiBuffer midi;
+
+    for (const auto rangeDb : { 0.0f, 30.0f })
+    {
+        setAllBandParams (processor, -40.0f, 0.3f, 1.0f, 50.0f, 6.0f);
+        setAllBandRangeParams (processor, true, rangeDb);
+
+        TestHelpers::fillWithSine (buffer, 48000.0, 1000.0, 0.9f);
 
         CHECK_NOTHROW (processor.processBlock (buffer, midi));
         CHECK (TestHelpers::allSamplesFinite (buffer));
@@ -161,10 +233,13 @@ TEST_CASE ("Rapid parameter automation across many blocks produces no NaN/Inf", 
 
         setAllBandParams (processor,
                            -60.0f + unit (rng) * 60.0f,
-                           1.0f + unit (rng) * 19.0f,
+                           // v0.3.0: sweep the full 0.2-20 range, including
+                           // upward (< 1.0) ratios.
+                           0.2f + unit (rng) * 19.8f,
                            0.1f + unit (rng) * 99.9f,
                            10.0f + unit (rng) * 990.0f,
                            -12.0f + unit (rng) * 36.0f);
+        setAllBandRangeParams (processor, unit (rng) > 0.5f, unit (rng) * 30.0f);
         setParam (processor, ParamIDs::output, -24.0f + unit (rng) * 48.0f);
 
         juce::AudioBuffer<float> buffer (2, 256);

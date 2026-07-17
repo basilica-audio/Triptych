@@ -18,6 +18,8 @@ void BandCompressor::prepare (const juce::dsp::ProcessSpec& spec)
     ratioSmoothed.setCurrentAndTargetValue (lastRatio);
     kneeSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
     kneeSmoothed.setCurrentAndTargetValue (lastKneePercent);
+    rangeSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
+    rangeSmoothed.setCurrentAndTargetValue (rangeEnabled ? lastRangeDb : trpt::unlimitedRangeDb);
 
     reset();
 
@@ -65,6 +67,20 @@ void BandCompressor::setMakeupDb (float newMakeupDb)
     makeupGain.setGainDecibels (newMakeupDb);
 }
 
+void BandCompressor::setRangeEnabled (bool shouldBeEnabled) noexcept
+{
+    rangeEnabled = shouldBeEnabled;
+    rangeSmoothed.setTargetValue (rangeEnabled ? lastRangeDb : trpt::unlimitedRangeDb);
+}
+
+void BandCompressor::setRangeDb (float newRangeDb)
+{
+    lastRangeDb = newRangeDb;
+
+    if (rangeEnabled)
+        rangeSmoothed.setTargetValue (lastRangeDb);
+}
+
 void BandCompressor::setLimiterThresholdDb (float newThresholdDb)
 {
     lastLimiterThresholdDb = newThresholdDb;
@@ -85,6 +101,7 @@ void BandCompressor::process (juce::dsp::AudioBlock<float>& block) noexcept
     const auto thresholdDbBlock = thresholdSmoothed.skip (static_cast<int> (numSamples));
     const auto ratioBlock = ratioSmoothed.skip (static_cast<int> (numSamples));
     const auto kneePercentBlock = kneeSmoothed.skip (static_cast<int> (numSamples));
+    const auto rangeDbBlock = rangeSmoothed.skip (static_cast<int> (numSamples));
 
     const auto numChannels = block.getNumChannels();
 
@@ -96,7 +113,7 @@ void BandCompressor::process (juce::dsp::AudioBlock<float>& block) noexcept
         {
             const auto inputValue = channelData[i];
             const auto envelope = envelopeFilter.processSample (static_cast<int> (channel), inputValue);
-            const auto gain = trpt::computeGainLinear (envelope, thresholdDbBlock, ratioBlock, kneePercentBlock);
+            const auto gain = trpt::computeGainLinear (envelope, thresholdDbBlock, ratioBlock, kneePercentBlock, rangeDbBlock);
 
             channelData[i] = gain * inputValue;
         }

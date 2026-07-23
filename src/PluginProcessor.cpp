@@ -72,6 +72,10 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     lowRangeEnabledOn = apvts.getRawParameterValue (ParamIDs::lowRangeEnabled);
     lowRangeDb = apvts.getRawParameterValue (ParamIDs::lowRange);
 
+    lowMidSideEnabledOn = apvts.getRawParameterValue (ParamIDs::lowMidSideEnabled);
+    lowSideThresholdDb = apvts.getRawParameterValue (ParamIDs::lowSideThreshold);
+    lowSideRatio = apvts.getRawParameterValue (ParamIDs::lowSideRatio);
+
     midThresholdDb = apvts.getRawParameterValue (ParamIDs::midThreshold);
     midRatio = apvts.getRawParameterValue (ParamIDs::midRatio);
     midKneePercent = apvts.getRawParameterValue (ParamIDs::midKnee);
@@ -81,6 +85,10 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     midRangeEnabledOn = apvts.getRawParameterValue (ParamIDs::midRangeEnabled);
     midRangeDb = apvts.getRawParameterValue (ParamIDs::midRange);
 
+    midMidSideEnabledOn = apvts.getRawParameterValue (ParamIDs::midMidSideEnabled);
+    midSideThresholdDb = apvts.getRawParameterValue (ParamIDs::midSideThreshold);
+    midSideRatio = apvts.getRawParameterValue (ParamIDs::midSideRatio);
+
     highThresholdDb = apvts.getRawParameterValue (ParamIDs::highThreshold);
     highRatio = apvts.getRawParameterValue (ParamIDs::highRatio);
     highKneePercent = apvts.getRawParameterValue (ParamIDs::highKnee);
@@ -89,6 +97,10 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     highMakeupDb = apvts.getRawParameterValue (ParamIDs::highMakeup);
     highRangeEnabledOn = apvts.getRawParameterValue (ParamIDs::highRangeEnabled);
     highRangeDb = apvts.getRawParameterValue (ParamIDs::highRange);
+
+    highMidSideEnabledOn = apvts.getRawParameterValue (ParamIDs::highMidSideEnabled);
+    highSideThresholdDb = apvts.getRawParameterValue (ParamIDs::highSideThreshold);
+    highSideRatio = apvts.getRawParameterValue (ParamIDs::highSideRatio);
 
     lowMuteOn = apvts.getRawParameterValue (ParamIDs::lowMute);
     lowSoloOn = apvts.getRawParameterValue (ParamIDs::lowSolo);
@@ -112,6 +124,9 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     jassert (lowMakeupDb != nullptr);
     jassert (lowRangeEnabledOn != nullptr);
     jassert (lowRangeDb != nullptr);
+    jassert (lowMidSideEnabledOn != nullptr);
+    jassert (lowSideThresholdDb != nullptr);
+    jassert (lowSideRatio != nullptr);
     jassert (midThresholdDb != nullptr);
     jassert (midRatio != nullptr);
     jassert (midKneePercent != nullptr);
@@ -120,6 +135,9 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     jassert (midMakeupDb != nullptr);
     jassert (midRangeEnabledOn != nullptr);
     jassert (midRangeDb != nullptr);
+    jassert (midMidSideEnabledOn != nullptr);
+    jassert (midSideThresholdDb != nullptr);
+    jassert (midSideRatio != nullptr);
     jassert (highThresholdDb != nullptr);
     jassert (highRatio != nullptr);
     jassert (highKneePercent != nullptr);
@@ -128,6 +146,9 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     jassert (highMakeupDb != nullptr);
     jassert (highRangeEnabledOn != nullptr);
     jassert (highRangeDb != nullptr);
+    jassert (highMidSideEnabledOn != nullptr);
+    jassert (highSideThresholdDb != nullptr);
+    jassert (highSideRatio != nullptr);
     jassert (lowMuteOn != nullptr);
     jassert (lowSoloOn != nullptr);
     jassert (midMuteOn != nullptr);
@@ -216,6 +237,10 @@ void TriptychAudioProcessor::pushParametersToEngine()
     engine.setLowRangeEnabled (lowRangeEnabledOn->load (std::memory_order_relaxed) > 0.5f);
     engine.setLowRangeDb (lowRangeDb->load (std::memory_order_relaxed));
 
+    engine.setLowMidSideEnabled (lowMidSideEnabledOn->load (std::memory_order_relaxed) > 0.5f);
+    engine.setLowSideThresholdDb (lowSideThresholdDb->load (std::memory_order_relaxed));
+    engine.setLowSideRatio (lowSideRatio->load (std::memory_order_relaxed));
+
     engine.setMidThresholdDb (midThresholdDb->load (std::memory_order_relaxed));
     engine.setMidRatio (midRatio->load (std::memory_order_relaxed));
     engine.setMidKneePercent (midKneePercent->load (std::memory_order_relaxed));
@@ -225,6 +250,10 @@ void TriptychAudioProcessor::pushParametersToEngine()
     engine.setMidRangeEnabled (midRangeEnabledOn->load (std::memory_order_relaxed) > 0.5f);
     engine.setMidRangeDb (midRangeDb->load (std::memory_order_relaxed));
 
+    engine.setMidMidSideEnabled (midMidSideEnabledOn->load (std::memory_order_relaxed) > 0.5f);
+    engine.setMidSideThresholdDb (midSideThresholdDb->load (std::memory_order_relaxed));
+    engine.setMidSideRatio (midSideRatio->load (std::memory_order_relaxed));
+
     engine.setHighThresholdDb (highThresholdDb->load (std::memory_order_relaxed));
     engine.setHighRatio (highRatio->load (std::memory_order_relaxed));
     engine.setHighKneePercent (highKneePercent->load (std::memory_order_relaxed));
@@ -233,6 +262,10 @@ void TriptychAudioProcessor::pushParametersToEngine()
     engine.setHighMakeupDb (highMakeupDb->load (std::memory_order_relaxed));
     engine.setHighRangeEnabled (highRangeEnabledOn->load (std::memory_order_relaxed) > 0.5f);
     engine.setHighRangeDb (highRangeDb->load (std::memory_order_relaxed));
+
+    engine.setHighMidSideEnabled (highMidSideEnabledOn->load (std::memory_order_relaxed) > 0.5f);
+    engine.setHighSideThresholdDb (highSideThresholdDb->load (std::memory_order_relaxed));
+    engine.setHighSideRatio (highSideRatio->load (std::memory_order_relaxed));
 
     engine.setLowMute (lowMuteOn->load (std::memory_order_relaxed) > 0.5f);
     engine.setLowSolo (lowSoloOn->load (std::memory_order_relaxed) > 0.5f);

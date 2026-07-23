@@ -24,6 +24,9 @@ TEST_CASE ("State round-trip preserves non-default values of every parameter", "
         ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midKnee, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
         ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highKnee, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
         ParamIDs::lowRange, ParamIDs::midRange, ParamIDs::highRange, // v0.3.0
+        ParamIDs::lowSideThreshold, ParamIDs::lowSideRatio, // v0.4.0
+        ParamIDs::midSideThreshold, ParamIDs::midSideRatio,
+        ParamIDs::highSideThreshold, ParamIDs::highSideRatio,
         ParamIDs::highLimiterThreshold,
         ParamIDs::output,
     };
@@ -93,6 +96,7 @@ TEST_CASE ("State round-trip preserves every bool parameter (Mute/Solo, High lim
         ParamIDs::highMute, ParamIDs::highSolo,
         ParamIDs::highLimiterEnabled,
         ParamIDs::lowRangeEnabled, ParamIDs::midRangeEnabled, ParamIDs::highRangeEnabled, // v0.3.0
+        ParamIDs::lowMidSideEnabled, ParamIDs::midMidSideEnabled, ParamIDs::highMidSideEnabled, // v0.4.0
     };
 
     std::vector<juce::RangedAudioParameter*> params;
@@ -427,4 +431,108 @@ TEST_CASE ("v0.3.0 defaults are bit-identical to v0.2.0: parameter values, Range
     const auto defaultsGrDb = juce::Decibels::gainToDecibels (measureTailRms (defaultsProcessed) / measureTailRms (input));
 
     CHECK (defaultsGrDb == Catch::Approx (referenceGrDb).margin (1e-3));
+}
+
+// v0.4.0 state migration tolerance (issue #24): a v0.3.0-shaped ValueTree -
+// missing all nine new M/S parameter IDs (three MidSideEnabled bools, three
+// each of SideThreshold/SideRatio) - must load without crashing or
+// asserting, with MidSideEnabled resolving to false and every Side float
+// resolving to its declared default, exactly mirroring the v0.2.0 Knee and
+// v0.3.0 Range/v0.4.0 Gate migration tests above.
+TEST_CASE ("State migration tolerance: a v0.3.0-shaped state (missing M/S IDs) loads cleanly with M/S disabled at its defaults", "[state][regression]")
+{
+    TriptychAudioProcessor source;
+    source.prepareToPlay (48000.0, 512);
+
+    auto* highThresholdParam = source.apvts.getParameter (ParamIDs::highThreshold);
+    auto* outputParam = source.apvts.getParameter (ParamIDs::output);
+    REQUIRE (highThresholdParam != nullptr);
+    REQUIRE (outputParam != nullptr);
+
+    highThresholdParam->setValueNotifyingHost (highThresholdParam->convertTo0to1 (-17.0f));
+    outputParam->setValueNotifyingHost (outputParam->convertTo0to1 (-2.0f));
+
+    juce::MemoryBlock v040State;
+    source.getStateInformation (v040State);
+    REQUIRE (v040State.getSize() > 0);
+
+    const std::unique_ptr<juce::XmlElement> xml (source.getXmlFromBinary (v040State.getData(), static_cast<int> (v040State.getSize())));
+    REQUIRE (xml != nullptr);
+
+    auto prunedTree = juce::ValueTree::fromXml (*xml);
+    REQUIRE (prunedTree.isValid());
+
+    static constexpr const char* midSideIds[] = {
+        ParamIDs::lowMidSideEnabled, ParamIDs::lowSideThreshold, ParamIDs::lowSideRatio,
+        ParamIDs::midMidSideEnabled, ParamIDs::midSideThreshold, ParamIDs::midSideRatio,
+        ParamIDs::highMidSideEnabled, ParamIDs::highSideThreshold, ParamIDs::highSideRatio,
+    };
+
+    for (const auto* midSideId : midSideIds)
+    {
+        for (int i = prunedTree.getNumChildren() - 1; i >= 0; --i)
+        {
+            auto child = prunedTree.getChild (i);
+
+            if (child.getProperty ("id").toString() == juce::String (midSideId))
+                prunedTree.removeChild (i, nullptr);
+        }
+    }
+
+    const auto fullChildCount = juce::ValueTree::fromXml (*xml).getNumChildren();
+    REQUIRE (prunedTree.getNumChildren() == fullChildCount - 9);
+
+    const std::unique_ptr<juce::XmlElement> prunedXml (prunedTree.createXml());
+    juce::MemoryBlock prunedState;
+    juce::AudioProcessor::copyXmlToBinary (*prunedXml, prunedState);
+
+    TriptychAudioProcessor destination;
+    destination.prepareToPlay (48000.0, 512);
+
+    CHECK_NOTHROW (destination.setStateInformation (prunedState.getData(), static_cast<int> (prunedState.getSize())));
+
+    auto* destHighThreshold = destination.apvts.getParameter (ParamIDs::highThreshold);
+    auto* destOutput = destination.apvts.getParameter (ParamIDs::output);
+    REQUIRE (destHighThreshold != nullptr);
+    REQUIRE (destOutput != nullptr);
+    CHECK (destHighThreshold->convertFrom0to1 (destHighThreshold->getValue()) == Catch::Approx (-17.0f).margin (1e-3));
+    CHECK (destOutput->convertFrom0to1 (destOutput->getValue()) == Catch::Approx (-2.0f).margin (1e-3));
+
+    static constexpr const char* midSideEnabledIds[] = { ParamIDs::lowMidSideEnabled, ParamIDs::midMidSideEnabled, ParamIDs::highMidSideEnabled };
+
+    for (const auto* id : midSideEnabledIds)
+    {
+        auto* param = dynamic_cast<juce::AudioParameterBool*> (destination.apvts.getParameter (id));
+        REQUIRE (param != nullptr);
+        CHECK (param->get() == false);
+    }
+
+    struct SideDefault
+    {
+        const char* thresholdId;
+        const char* ratioId;
+        float thresholdDb;
+    };
+
+    static const SideDefault sideDefaults[] = {
+        { ParamIDs::lowSideThreshold, ParamIDs::lowSideRatio, -24.0f },
+        { ParamIDs::midSideThreshold, ParamIDs::midSideRatio, -30.0f },
+        { ParamIDs::highSideThreshold, ParamIDs::highSideRatio, -20.0f },
+    };
+
+    for (const auto& sideDefault : sideDefaults)
+    {
+        auto* thresholdParam = destination.apvts.getParameter (sideDefault.thresholdId);
+        auto* ratioParam = destination.apvts.getParameter (sideDefault.ratioId);
+        REQUIRE (thresholdParam != nullptr);
+        REQUIRE (ratioParam != nullptr);
+
+        CHECK (thresholdParam->convertFrom0to1 (thresholdParam->getValue()) == Catch::Approx (sideDefault.thresholdDb).margin (1e-3));
+        CHECK (ratioParam->convertFrom0to1 (ratioParam->getValue()) == Catch::Approx (1.0f).margin (1e-3));
+    }
+
+    juce::AudioBuffer<float> buffer (2, 512);
+    buffer.clear();
+    juce::MidiBuffer midi;
+    CHECK_NOTHROW (destination.processBlock (buffer, midi));
 }

@@ -1,5 +1,6 @@
 #include "BandCompressor.h"
 #include "KneeGainComputer.h"
+#include "MidSideCodec.h"
 
 void BandCompressor::prepare (const juce::dsp::ProcessSpec& spec)
 {
@@ -20,6 +21,11 @@ void BandCompressor::prepare (const juce::dsp::ProcessSpec& spec)
     kneeSmoothed.setCurrentAndTargetValue (lastKneePercent);
     rangeSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
     rangeSmoothed.setCurrentAndTargetValue (rangeEnabled ? lastRangeDb : trpt::unlimitedRangeDb);
+
+    sideThresholdSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
+    sideThresholdSmoothed.setCurrentAndTargetValue (lastSideThresholdDb);
+    sideRatioSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
+    sideRatioSmoothed.setCurrentAndTargetValue (lastSideRatio);
 
     reset();
 
@@ -87,6 +93,23 @@ void BandCompressor::setLimiterThresholdDb (float newThresholdDb)
     limiter.setThreshold (newThresholdDb);
 }
 
+void BandCompressor::setMidSideEnabled (bool shouldBeEnabled) noexcept
+{
+    midSideEnabled = shouldBeEnabled;
+}
+
+void BandCompressor::setSideThresholdDb (float newThresholdDb)
+{
+    lastSideThresholdDb = newThresholdDb;
+    sideThresholdSmoothed.setTargetValue (newThresholdDb);
+}
+
+void BandCompressor::setSideRatio (float newRatio)
+{
+    lastSideRatio = newRatio;
+    sideRatioSmoothed.setTargetValue (newRatio);
+}
+
 void BandCompressor::process (juce::dsp::AudioBlock<float>& block) noexcept
 {
     const auto numSamples = block.getNumSamples();
@@ -103,20 +126,55 @@ void BandCompressor::process (juce::dsp::AudioBlock<float>& block) noexcept
     const auto kneePercentBlock = kneeSmoothed.skip (static_cast<int> (numSamples));
     const auto rangeDbBlock = rangeSmoothed.skip (static_cast<int> (numSamples));
 
+    // Per-band Mid/Side (v0.4.0): Side's own smoothed threshold/ratio.
+    const auto sideThresholdDbBlock = sideThresholdSmoothed.skip (static_cast<int> (numSamples));
+    const auto sideRatioBlock = sideRatioSmoothed.skip (static_cast<int> (numSamples));
+
     const auto numChannels = block.getNumChannels();
+
+    // M/S is only meaningful for a genuine stereo pair - defensively skipped
+    // on any other channel count (mono, or an unexpected >2), see
+    // setMidSideEnabled()'s doc comment in BandCompressor.h.
+    const bool applyMidSide = midSideEnabled && numChannels == 2;
+
+    if (applyMidSide)
+    {
+        auto* leftData = block.getChannelPointer (0);
+        auto* rightData = block.getChannelPointer (1);
+
+        for (size_t i = 0; i < numSamples; ++i)
+            trpt::encodeMidSide (leftData[i], rightData[i], leftData[i], rightData[i]);
+    }
 
     for (size_t channel = 0; channel < numChannels; ++channel)
     {
         auto* channelData = block.getChannelPointer (channel);
 
+        // After the encode above, channel 0 holds Mid and channel 1 holds
+        // Side when M/S is engaged - the main Threshold/Ratio drive Mid
+        // (matching pre-v0.4.0 stereo-linked behaviour when M/S is
+        // disabled); Side gets its own independent Threshold/Ratio.
+        const bool isSideChannel = applyMidSide && channel == 1;
+        const auto channelThresholdDb = isSideChannel ? sideThresholdDbBlock : thresholdDbBlock;
+        const auto channelRatio = isSideChannel ? sideRatioBlock : ratioBlock;
+
         for (size_t i = 0; i < numSamples; ++i)
         {
             const auto inputValue = channelData[i];
             const auto envelope = envelopeFilter.processSample (static_cast<int> (channel), inputValue);
-            const auto gain = trpt::computeGainLinear (envelope, thresholdDbBlock, ratioBlock, kneePercentBlock, rangeDbBlock);
+            const auto gain = trpt::computeGainLinear (envelope, channelThresholdDb, channelRatio, kneePercentBlock, rangeDbBlock);
 
             channelData[i] = gain * inputValue;
         }
+    }
+
+    if (applyMidSide)
+    {
+        auto* midData = block.getChannelPointer (0);
+        auto* sideData = block.getChannelPointer (1);
+
+        for (size_t i = 0; i < numSamples; ++i)
+            trpt::decodeMidSide (midData[i], sideData[i], midData[i], sideData[i]);
     }
 
     juce::dsp::ProcessContextReplacing<float> context (block);

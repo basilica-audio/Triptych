@@ -63,6 +63,16 @@ Each band's own compressor (Knee → Threshold/Ratio → Range → Attack/Releas
 | **Range On** (Range Enabled) | Off / On | Off | Engages the band's maximum gain-change clamp. Off by default, so the band's Ratio/Knee curve behaves exactly as the table above describes with no ceiling on how far it can push gain up or down. |
 | **Range** | 0 – 30 | 12 | dB | The maximum gain change (cut *or* boost) the band's compressor is allowed to apply, once Range On is engaged. This is what makes an aggressive Ratio setting - especially a strongly upward (well below 1:1) one, whose boost otherwise grows without bound the further above Threshold the signal sits - stay musically usable rather than a runaway. Only takes effect while Range On is engaged; the dB value itself has no effect while it's off. |
 
+### Per-band Mid/Side *(new in v0.4.0)*
+
+| Parameter | Range | Low default | Mid default | High default | Unit | What it does |
+|---|---|---|---|---|---|---|
+| **M/S On** (M/S Enabled) | Off / On | Off | Off | Off | | Encodes that band's stereo signal to Mid/Side before its gain computation and decodes back to L/R afterward. Off by default, so the band stays stereo-linked exactly as the tables above describe. Only takes effect on a genuine stereo bus - a defensive no-op on mono. |
+| **Side Threshold** | -60 – 0 | -24 | -30 | -20 | dB | The Side (difference/width) component's own, independent Threshold - separate from the main Threshold above, which continues to drive the Mid (centre/sum) component. |
+| **Side Ratio** | 0.2:1 – 20:1 | 1:1 | 1:1 | 1:1 | : 1 | The Side component's own Ratio, sharing the band's Knee/Attack/Release/Range with Mid. Defaults to 1:1 (exact bypass) on every band, so simply enabling M/S with no further tweaking compresses only the centre content using the band's existing Threshold/Ratio while leaving the stereo width untouched - a sensible starting point for tightening a mix's centre (vocal, kick, bass) without narrowing its width. |
+
+Because L + R after decode depends only on Mid (algebraically independent of whatever happens to Side), processing the Side component - however aggressively - can never introduce a phase-cancellation artifact into a mono downmix; only changing the Mid component's own processing changes the mono sum, which is the intended, audible effect of compressing/expanding the centre.
+
 ### Per-band Mute / Solo (Low, Mid, High)
 
 | Parameter | Values | Default | What it does |

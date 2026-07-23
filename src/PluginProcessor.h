@@ -77,6 +77,11 @@ private:
     std::atomic<float>* lowRangeEnabledOn = nullptr;
     std::atomic<float>* lowRangeDb = nullptr;
 
+    // Per-band Mid/Side processing (v0.4.0, issue #24).
+    std::atomic<float>* lowMidSideEnabledOn = nullptr;
+    std::atomic<float>* lowSideThresholdDb = nullptr;
+    std::atomic<float>* lowSideRatio = nullptr;
+
     std::atomic<float>* midThresholdDb = nullptr;
     std::atomic<float>* midRatio = nullptr;
     std::atomic<float>* midKneePercent = nullptr;
@@ -86,6 +91,10 @@ private:
     std::atomic<float>* midRangeEnabledOn = nullptr;
     std::atomic<float>* midRangeDb = nullptr;
 
+    std::atomic<float>* midMidSideEnabledOn = nullptr;
+    std::atomic<float>* midSideThresholdDb = nullptr;
+    std::atomic<float>* midSideRatio = nullptr;
+
     std::atomic<float>* highThresholdDb = nullptr;
     std::atomic<float>* highRatio = nullptr;
     std::atomic<float>* highKneePercent = nullptr;
@@ -94,6 +103,10 @@ private:
     std::atomic<float>* highMakeupDb = nullptr;
     std::atomic<float>* highRangeEnabledOn = nullptr;
     std::atomic<float>* highRangeDb = nullptr;
+
+    std::atomic<float>* highMidSideEnabledOn = nullptr;
+    std::atomic<float>* highSideThresholdDb = nullptr;
+    std::atomic<float>* highSideRatio = nullptr;
 
     // Per-band Mute/Solo (M1). AudioParameterBool's raw APVTS value is
     // 0.0f/1.0f, thresholded at 0.5f in pushParametersToEngine() - the same

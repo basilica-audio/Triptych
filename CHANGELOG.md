@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-23
+
 ### Added
 
 - **Downward expansion / gating** (GitHub issue #25): an independent, per-band noise-gate/expander stage with its own Threshold (`lowGateThreshold`/`midGateThreshold`/`highGateThreshold`, -80 to 0 dB), Ratio (`lowGateRatio` et al., 1:1-100:1, default 2:1), Attack (`lowGateAttack` et al., 0.1-50 ms), and Release (`lowGateRelease` et al., 10-2000 ms), plus a per-band `xGateEnabled` toggle (default off). Reuses the existing `juce::dsp::BallisticsFilter`-based detector topology (a second, independently configured instance) rather than a structurally different detection method, and is keyed off the same pre-compression input sample as the band's own compressor, so gating a band is never masked by, or interacting with, that band's own compression curve. See `docs/architecture.md`'s "Downward expansion / gating (v0.4.0)" section and `src/dsp/GateGainComputer.h` for the sourced transfer-curve model (the standard downward expander).

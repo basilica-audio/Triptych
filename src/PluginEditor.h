@@ -54,6 +54,11 @@ private:
         Knob makeup;
         Toggle rangeEnabled;
         Knob range;
+        Toggle gateEnabled;
+        Knob gateThreshold;
+        Knob gateRatio;
+        Knob gateAttack;
+        Knob gateRelease;
         Toggle midSideEnabled;
         Knob sideThreshold;
         Knob sideRatio;

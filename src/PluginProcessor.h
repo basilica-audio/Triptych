@@ -77,6 +77,12 @@ private:
     std::atomic<float>* lowRangeEnabledOn = nullptr;
     std::atomic<float>* lowRangeDb = nullptr;
 
+    // Downward expansion / gating (v0.4.0, issue #25).
+    std::atomic<float>* lowGateEnabledOn = nullptr;
+    std::atomic<float>* lowGateThresholdDb = nullptr;
+    std::atomic<float>* lowGateRatio = nullptr;
+    std::atomic<float>* lowGateAttackMs = nullptr;
+    std::atomic<float>* lowGateReleaseMs = nullptr;
     // Per-band Mid/Side processing (v0.4.0, issue #24).
     std::atomic<float>* lowMidSideEnabledOn = nullptr;
     std::atomic<float>* lowSideThresholdDb = nullptr;
@@ -91,6 +97,11 @@ private:
     std::atomic<float>* midRangeEnabledOn = nullptr;
     std::atomic<float>* midRangeDb = nullptr;
 
+    std::atomic<float>* midGateEnabledOn = nullptr;
+    std::atomic<float>* midGateThresholdDb = nullptr;
+    std::atomic<float>* midGateRatio = nullptr;
+    std::atomic<float>* midGateAttackMs = nullptr;
+    std::atomic<float>* midGateReleaseMs = nullptr;
     std::atomic<float>* midMidSideEnabledOn = nullptr;
     std::atomic<float>* midSideThresholdDb = nullptr;
     std::atomic<float>* midSideRatio = nullptr;
@@ -104,6 +115,11 @@ private:
     std::atomic<float>* highRangeEnabledOn = nullptr;
     std::atomic<float>* highRangeDb = nullptr;
 
+    std::atomic<float>* highGateEnabledOn = nullptr;
+    std::atomic<float>* highGateThresholdDb = nullptr;
+    std::atomic<float>* highGateRatio = nullptr;
+    std::atomic<float>* highGateAttackMs = nullptr;
+    std::atomic<float>* highGateReleaseMs = nullptr;
     std::atomic<float>* highMidSideEnabledOn = nullptr;
     std::atomic<float>* highSideThresholdDb = nullptr;
     std::atomic<float>* highSideRatio = nullptr;

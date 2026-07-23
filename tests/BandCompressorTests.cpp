@@ -544,6 +544,169 @@ TEST_CASE ("BandCompressor: limiter ballistics track input while disabled, not f
     CHECK (maxAbsoluteDifference < 0.05f);
 }
 
+// Downward expansion / gating (v0.4.0, issue #25): real, envelope-integrated
+// proof that a quiet signal below the gate threshold is measurably
+// attenuated when the gate is enabled, mirroring the compressor's own
+// gain-reduction tests above but for the independent gate stage.
+TEST_CASE ("BandCompressor: Gate attenuates a signal below its threshold when enabled", "[dsp][compressor][gate]")
+{
+    auto makeBand = [] (bool gateEnabled)
+    {
+        auto band = std::make_unique<BandCompressor>();
+        band->setThresholdDb (-6.0f); // compressor threshold well above the test signal, so it never engages
+        band->setRatio (1.0f); // compressor bypassed - isolates the gate's own behaviour
+        band->setMakeupDb (0.0f);
+        band->setGateThresholdDb (-30.0f);
+        band->setGateRatio (10.0f); // steep expansion ratio for an unambiguous measurement
+        band->setGateAttackMs (0.5f);
+        band->setGateReleaseMs (20.0f);
+        band->setGateEnabled (gateEnabled);
+
+        const auto spec = makeTestSpec (2);
+        band->prepare (spec);
+        return band;
+    };
+
+    // -40 dBFS sine: comfortably below the -30 dB gate threshold but well
+    // above true silence, so the envelope follower has a genuine non-zero
+    // level to track.
+    juce::AudioBuffer<float> reference (2, testBlockSize);
+    TestHelpers::fillWithSine (reference, testSampleRate, testFrequencyHz, 0.01f);
+
+    const auto tailRms = [] (const juce::AudioBuffer<float>& buffer)
+    {
+        constexpr int settleSamples = testBlockSize / 2;
+        double sumOfSquares = 0.0;
+        int counted = 0;
+
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+        {
+            const auto* data = buffer.getReadPointer (channel);
+
+            for (int i = settleSamples; i < buffer.getNumSamples(); ++i)
+            {
+                sumOfSquares += static_cast<double> (data[i]) * static_cast<double> (data[i]);
+                ++counted;
+            }
+        }
+
+        return counted > 0 ? std::sqrt (sumOfSquares / static_cast<double> (counted)) : 0.0;
+    };
+
+    const auto inputRms = tailRms (reference);
+    REQUIRE (inputRms > 0.0);
+
+    auto disabledBand = makeBand (false);
+    juce::AudioBuffer<float> disabledProcessed;
+    disabledProcessed.makeCopyOf (reference);
+    juce::dsp::AudioBlock<float> disabledBlock (disabledProcessed);
+    disabledBand->process (disabledBlock);
+    const auto disabledGainChangeDb = juce::Decibels::gainToDecibels (tailRms (disabledProcessed) / inputRms);
+
+    // Sanity: with the gate disabled, the signal passes through essentially
+    // unchanged (compressor bypassed, no makeup).
+    CHECK (disabledGainChangeDb == Catch::Approx (0.0f).margin (0.5));
+
+    auto enabledBand = makeBand (true);
+    juce::AudioBuffer<float> enabledProcessed;
+    enabledProcessed.makeCopyOf (reference);
+    juce::dsp::AudioBlock<float> enabledBlock (enabledProcessed);
+    enabledBand->process (enabledBlock);
+    const auto enabledGainChangeDb = juce::Decibels::gainToDecibels (tailRms (enabledProcessed) / inputRms);
+
+    // With the gate engaged, a signal sitting 20 dB below the gate
+    // threshold at a 10:1 expansion ratio should be measurably attenuated -
+    // far more than the disabled case.
+    CHECK (enabledGainChangeDb < -10.0);
+    CHECK (TestHelpers::allSamplesFinite (enabledProcessed));
+}
+
+// Regression: a band whose Gate API is never touched at all must behave
+// identically to one that explicitly disables it - the same "untouched ==
+// explicitly disabled" guarantee Range's own regression test proves above.
+TEST_CASE ("BandCompressor: Gate untouched reproduces the same output as Gate explicitly disabled", "[dsp][compressor][gate][regression]")
+{
+    auto makeBand = [] (bool touchGateApi)
+    {
+        auto band = std::make_unique<BandCompressor>();
+        band->setThresholdDb (-24.0f);
+        band->setRatio (2.5f);
+        band->setKneePercent (50.0f);
+        band->setAttackMs (10.0f);
+        band->setReleaseMs (100.0f);
+        band->setMakeupDb (0.0f);
+
+        if (touchGateApi)
+            band->setGateEnabled (false);
+
+        const auto spec = makeTestSpec (2);
+        band->prepare (spec);
+        return band;
+    };
+
+    auto untouched = makeBand (false);
+    auto explicitlyDisabled = makeBand (true);
+
+    juce::AudioBuffer<float> bufferA (2, testBlockSize);
+    TestHelpers::fillWithSine (bufferA, testSampleRate, testFrequencyHz, 0.7f);
+    juce::AudioBuffer<float> bufferB;
+    bufferB.makeCopyOf (bufferA);
+
+    juce::dsp::AudioBlock<float> blockA (bufferA);
+    juce::dsp::AudioBlock<float> blockB (bufferB);
+    untouched->process (blockA);
+    explicitlyDisabled->process (blockB);
+
+    for (int channel = 0; channel < bufferA.getNumChannels(); ++channel)
+    {
+        const auto* dataA = bufferA.getReadPointer (channel);
+        const auto* dataB = bufferB.getReadPointer (channel);
+
+        for (int i = 0; i < testBlockSize; ++i)
+            CHECK (dataA[i] == Catch::Approx (dataB[i]).margin (1e-9f));
+    }
+}
+
+// A signal above the gate threshold must pass through unaffected by the
+// gate even while it's engaged - the gate only ever attenuates, never
+// boosts or otherwise colours signal already above its own threshold.
+TEST_CASE ("BandCompressor: Gate leaves a signal above its threshold untouched", "[dsp][compressor][gate]")
+{
+    auto band = std::make_unique<BandCompressor>();
+    band->setThresholdDb (0.0f); // compressor threshold at 0 dB - never engages for this test signal
+    band->setRatio (1.0f);
+    band->setMakeupDb (0.0f);
+    band->setGateThresholdDb (-30.0f);
+    band->setGateRatio (20.0f);
+    band->setGateAttackMs (0.5f);
+    band->setGateReleaseMs (20.0f);
+    band->setGateEnabled (true);
+
+    const auto spec = makeTestSpec (2);
+    band->prepare (spec);
+
+    // -6 dBFS: comfortably above the -30 dB gate threshold.
+    juce::AudioBuffer<float> reference (2, testBlockSize);
+    TestHelpers::fillWithSine (reference, testSampleRate, testFrequencyHz, 0.5f);
+
+    juce::AudioBuffer<float> processed;
+    processed.makeCopyOf (reference);
+
+    juce::dsp::AudioBlock<float> block (processed);
+    band->process (block);
+
+    constexpr int settleSamples = testBlockSize / 2;
+
+    for (int channel = 0; channel < reference.getNumChannels(); ++channel)
+    {
+        const auto* refData = reference.getReadPointer (channel);
+        const auto* outData = processed.getReadPointer (channel);
+
+        for (int i = settleSamples; i < testBlockSize; ++i)
+            CHECK (outData[i] == Catch::Approx (refData[i]).margin (1e-3));
+    }
+}
+
 // Per-band Mid/Side processing (v0.4.0, issue #24): L/R passthrough when
 // disabled - a stereo signal with distinct L/R content must pass through
 // completely unaffected by the M/S machinery while setMidSideEnabled() is

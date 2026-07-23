@@ -24,6 +24,9 @@ TEST_CASE ("State round-trip preserves non-default values of every parameter", "
         ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midKnee, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
         ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highKnee, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
         ParamIDs::lowRange, ParamIDs::midRange, ParamIDs::highRange, // v0.3.0
+        ParamIDs::lowGateThreshold, ParamIDs::lowGateRatio, ParamIDs::lowGateAttack, ParamIDs::lowGateRelease, // v0.4.0
+        ParamIDs::midGateThreshold, ParamIDs::midGateRatio, ParamIDs::midGateAttack, ParamIDs::midGateRelease,
+        ParamIDs::highGateThreshold, ParamIDs::highGateRatio, ParamIDs::highGateAttack, ParamIDs::highGateRelease,
         ParamIDs::lowSideThreshold, ParamIDs::lowSideRatio, // v0.4.0
         ParamIDs::midSideThreshold, ParamIDs::midSideRatio,
         ParamIDs::highSideThreshold, ParamIDs::highSideRatio,
@@ -96,6 +99,7 @@ TEST_CASE ("State round-trip preserves every bool parameter (Mute/Solo, High lim
         ParamIDs::highMute, ParamIDs::highSolo,
         ParamIDs::highLimiterEnabled,
         ParamIDs::lowRangeEnabled, ParamIDs::midRangeEnabled, ParamIDs::highRangeEnabled, // v0.3.0
+        ParamIDs::lowGateEnabled, ParamIDs::midGateEnabled, ParamIDs::highGateEnabled, // v0.4.0
         ParamIDs::lowMidSideEnabled, ParamIDs::midMidSideEnabled, ParamIDs::highMidSideEnabled, // v0.4.0
     };
 
@@ -433,12 +437,121 @@ TEST_CASE ("v0.3.0 defaults are bit-identical to v0.2.0: parameter values, Range
     CHECK (defaultsGrDb == Catch::Approx (referenceGrDb).margin (1e-3));
 }
 
-// v0.4.0 state migration tolerance (issue #24): a v0.3.0-shaped ValueTree -
-// missing all nine new M/S parameter IDs (three MidSideEnabled bools, three
-// each of SideThreshold/SideRatio) - must load without crashing or
-// asserting, with MidSideEnabled resolving to false and every Side float
-// resolving to its declared default, exactly mirroring the v0.2.0 Knee and
-// v0.3.0 Range/v0.4.0 Gate migration tests above.
+// v0.4.0 state migration tolerance (issue #25): a v0.3.0-shaped ValueTree -
+// missing all fifteen new Gate parameter IDs (three GateEnabled bools, three
+// each of GateThreshold/GateRatio/GateAttack/GateRelease) - must load without
+// crashing or asserting, with GateEnabled resolving to false and every Gate
+// float resolving to its declared default, exactly mirroring the v0.2.0 Knee
+// and v0.3.0 Range migration tests above.
+TEST_CASE ("State migration tolerance: a v0.3.0-shaped state (missing Gate IDs) loads cleanly with Gate disabled at its defaults", "[state][regression]")
+{
+    TriptychAudioProcessor source;
+    source.prepareToPlay (48000.0, 512);
+
+    auto* lowThresholdParam = source.apvts.getParameter (ParamIDs::lowThreshold);
+    auto* outputParam = source.apvts.getParameter (ParamIDs::output);
+    REQUIRE (lowThresholdParam != nullptr);
+    REQUIRE (outputParam != nullptr);
+
+    lowThresholdParam->setValueNotifyingHost (lowThresholdParam->convertTo0to1 (-27.0f));
+    outputParam->setValueNotifyingHost (outputParam->convertTo0to1 (2.0f));
+
+    juce::MemoryBlock v040State;
+    source.getStateInformation (v040State);
+    REQUIRE (v040State.getSize() > 0);
+
+    const std::unique_ptr<juce::XmlElement> xml (source.getXmlFromBinary (v040State.getData(), static_cast<int> (v040State.getSize())));
+    REQUIRE (xml != nullptr);
+
+    auto prunedTree = juce::ValueTree::fromXml (*xml);
+    REQUIRE (prunedTree.isValid());
+
+    static constexpr const char* gateIds[] = {
+        ParamIDs::lowGateEnabled, ParamIDs::lowGateThreshold, ParamIDs::lowGateRatio, ParamIDs::lowGateAttack, ParamIDs::lowGateRelease,
+        ParamIDs::midGateEnabled, ParamIDs::midGateThreshold, ParamIDs::midGateRatio, ParamIDs::midGateAttack, ParamIDs::midGateRelease,
+        ParamIDs::highGateEnabled, ParamIDs::highGateThreshold, ParamIDs::highGateRatio, ParamIDs::highGateAttack, ParamIDs::highGateRelease,
+    };
+
+    for (const auto* gateId : gateIds)
+    {
+        for (int i = prunedTree.getNumChildren() - 1; i >= 0; --i)
+        {
+            auto child = prunedTree.getChild (i);
+
+            if (child.getProperty ("id").toString() == juce::String (gateId))
+                prunedTree.removeChild (i, nullptr);
+        }
+    }
+
+    const auto fullChildCount = juce::ValueTree::fromXml (*xml).getNumChildren();
+    REQUIRE (prunedTree.getNumChildren() == fullChildCount - 15);
+
+    const std::unique_ptr<juce::XmlElement> prunedXml (prunedTree.createXml());
+    juce::MemoryBlock prunedState;
+    juce::AudioProcessor::copyXmlToBinary (*prunedXml, prunedState);
+
+    TriptychAudioProcessor destination;
+    destination.prepareToPlay (48000.0, 512);
+
+    CHECK_NOTHROW (destination.setStateInformation (prunedState.getData(), static_cast<int> (prunedState.getSize())));
+
+    auto* destLowThreshold = destination.apvts.getParameter (ParamIDs::lowThreshold);
+    auto* destOutput = destination.apvts.getParameter (ParamIDs::output);
+    REQUIRE (destLowThreshold != nullptr);
+    REQUIRE (destOutput != nullptr);
+    CHECK (destLowThreshold->convertFrom0to1 (destLowThreshold->getValue()) == Catch::Approx (-27.0f).margin (1e-3));
+    CHECK (destOutput->convertFrom0to1 (destOutput->getValue()) == Catch::Approx (2.0f).margin (1e-3));
+
+    static constexpr const char* gateEnabledIds[] = { ParamIDs::lowGateEnabled, ParamIDs::midGateEnabled, ParamIDs::highGateEnabled };
+
+    for (const auto* id : gateEnabledIds)
+    {
+        auto* param = dynamic_cast<juce::AudioParameterBool*> (destination.apvts.getParameter (id));
+        REQUIRE (param != nullptr);
+        CHECK (param->get() == false);
+    }
+
+    struct GateDefault
+    {
+        const char* thresholdId;
+        const char* ratioId;
+        const char* attackId;
+        const char* releaseId;
+        float thresholdDb;
+        float attackMs;
+        float releaseMs;
+    };
+
+    static const GateDefault gateDefaults[] = {
+        { ParamIDs::lowGateThreshold, ParamIDs::lowGateRatio, ParamIDs::lowGateAttack, ParamIDs::lowGateRelease, -50.0f, 10.0f, 200.0f },
+        { ParamIDs::midGateThreshold, ParamIDs::midGateRatio, ParamIDs::midGateAttack, ParamIDs::midGateRelease, -55.0f, 5.0f, 150.0f },
+        { ParamIDs::highGateThreshold, ParamIDs::highGateRatio, ParamIDs::highGateAttack, ParamIDs::highGateRelease, -45.0f, 2.0f, 100.0f },
+    };
+
+    for (const auto& gateDefault : gateDefaults)
+    {
+        auto* thresholdParam = destination.apvts.getParameter (gateDefault.thresholdId);
+        auto* ratioParam = destination.apvts.getParameter (gateDefault.ratioId);
+        auto* attackParam = destination.apvts.getParameter (gateDefault.attackId);
+        auto* releaseParam = destination.apvts.getParameter (gateDefault.releaseId);
+        REQUIRE (thresholdParam != nullptr);
+        REQUIRE (ratioParam != nullptr);
+        REQUIRE (attackParam != nullptr);
+        REQUIRE (releaseParam != nullptr);
+
+        CHECK (thresholdParam->convertFrom0to1 (thresholdParam->getValue()) == Catch::Approx (gateDefault.thresholdDb).margin (1e-3));
+        CHECK (ratioParam->convertFrom0to1 (ratioParam->getValue()) == Catch::Approx (2.0f).margin (1e-3));
+        CHECK (attackParam->convertFrom0to1 (attackParam->getValue()) == Catch::Approx (gateDefault.attackMs).margin (1e-3));
+        CHECK (releaseParam->convertFrom0to1 (releaseParam->getValue()) == Catch::Approx (gateDefault.releaseMs).margin (1e-3));
+    }
+
+    juce::AudioBuffer<float> buffer (2, 512);
+    buffer.clear();
+    juce::MidiBuffer midi;
+    CHECK_NOTHROW (destination.processBlock (buffer, midi));
+}
+
+
 TEST_CASE ("State migration tolerance: a v0.3.0-shaped state (missing M/S IDs) loads cleanly with M/S disabled at its defaults", "[state][regression]")
 {
     TriptychAudioProcessor source;

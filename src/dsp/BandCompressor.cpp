@@ -1,4 +1,5 @@
 #include "BandCompressor.h"
+#include "GateGainComputer.h"
 #include "KneeGainComputer.h"
 #include "MidSideCodec.h"
 
@@ -22,6 +23,12 @@ void BandCompressor::prepare (const juce::dsp::ProcessSpec& spec)
     rangeSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
     rangeSmoothed.setCurrentAndTargetValue (rangeEnabled ? lastRangeDb : trpt::unlimitedRangeDb);
 
+    gateEnvelopeFilter.prepare (spec);
+    gateThresholdSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
+    gateThresholdSmoothed.setCurrentAndTargetValue (lastGateThresholdDb);
+    gateRatioSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
+    gateRatioSmoothed.setCurrentAndTargetValue (gateEnabled ? lastGateRatio : 1.0f);
+
     sideThresholdSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
     sideThresholdSmoothed.setCurrentAndTargetValue (lastSideThresholdDb);
     sideRatioSmoothed.reset (spec.sampleRate, smoothingTimeSeconds);
@@ -36,6 +43,7 @@ void BandCompressor::prepare (const juce::dsp::ProcessSpec& spec)
 void BandCompressor::reset()
 {
     envelopeFilter.reset();
+    gateEnvelopeFilter.reset();
     makeupGain.reset();
     limiter.reset();
 }
@@ -93,6 +101,36 @@ void BandCompressor::setLimiterThresholdDb (float newThresholdDb)
     limiter.setThreshold (newThresholdDb);
 }
 
+void BandCompressor::setGateEnabled (bool shouldBeEnabled) noexcept
+{
+    gateEnabled = shouldBeEnabled;
+    gateRatioSmoothed.setTargetValue (gateEnabled ? lastGateRatio : 1.0f);
+}
+
+void BandCompressor::setGateThresholdDb (float newThresholdDb)
+{
+    lastGateThresholdDb = newThresholdDb;
+    gateThresholdSmoothed.setTargetValue (newThresholdDb);
+}
+
+void BandCompressor::setGateRatio (float newRatio)
+{
+    lastGateRatio = newRatio;
+
+    if (gateEnabled)
+        gateRatioSmoothed.setTargetValue (lastGateRatio);
+}
+
+void BandCompressor::setGateAttackMs (float newAttackMs)
+{
+    gateEnvelopeFilter.setAttackTime (newAttackMs);
+}
+
+void BandCompressor::setGateReleaseMs (float newReleaseMs)
+{
+    gateEnvelopeFilter.setReleaseTime (newReleaseMs);
+}
+
 void BandCompressor::setMidSideEnabled (bool shouldBeEnabled) noexcept
 {
     midSideEnabled = shouldBeEnabled;
@@ -125,6 +163,11 @@ void BandCompressor::process (juce::dsp::AudioBlock<float>& block) noexcept
     const auto ratioBlock = ratioSmoothed.skip (static_cast<int> (numSamples));
     const auto kneePercentBlock = kneeSmoothed.skip (static_cast<int> (numSamples));
     const auto rangeDbBlock = rangeSmoothed.skip (static_cast<int> (numSamples));
+
+    // Downward expansion / gating (v0.4.0): its own smoothed threshold/ratio,
+    // re-derived once per block the same way as the compressor's own.
+    const auto gateThresholdDbBlock = gateThresholdSmoothed.skip (static_cast<int> (numSamples));
+    const auto gateRatioBlock = gateRatioSmoothed.skip (static_cast<int> (numSamples));
 
     // Per-band Mid/Side (v0.4.0): Side's own smoothed threshold/ratio.
     const auto sideThresholdDbBlock = sideThresholdSmoothed.skip (static_cast<int> (numSamples));
@@ -164,7 +207,16 @@ void BandCompressor::process (juce::dsp::AudioBlock<float>& block) noexcept
             const auto envelope = envelopeFilter.processSample (static_cast<int> (channel), inputValue);
             const auto gain = trpt::computeGainLinear (envelope, channelThresholdDb, channelRatio, kneePercentBlock, rangeDbBlock);
 
-            channelData[i] = gain * inputValue;
+            // Downward expansion / gating (v0.4.0): a second, independent
+            // envelope follower/gain computer, keyed off the same
+            // pre-compression input sample as the compressor's own envelope
+            // above (see setGateEnabled()'s doc comment) - so the two gains
+            // are always combined multiplicatively against the original
+            // input, never chained against each other's output.
+            const auto gateEnvelope = gateEnvelopeFilter.processSample (static_cast<int> (channel), inputValue);
+            const auto gateGain = trpt::computeGateGainLinear (gateEnvelope, gateThresholdDbBlock, gateRatioBlock);
+
+            channelData[i] = gain * gateGain * inputValue;
         }
     }
 

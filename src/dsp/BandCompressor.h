@@ -108,6 +108,34 @@ public:
     void setLimiterEnabled (bool shouldBeEnabled) noexcept { limiterEnabled = shouldBeEnabled; }
     void setLimiterThresholdDb (float newThresholdDb);
 
+    // Downward expansion / gating (v0.4.0, issue #25): an independent,
+    // per-band noise-gate/expander stage with its own threshold/ratio/
+    // attack/release - see src/dsp/GateGainComputer.h for the pure transfer-
+    // curve math. Reuses the exact same detector topology as the compressor
+    // above rather than a second, structurally different detection method:
+    // a second juce::dsp::BallisticsFilter instance (gateEnvelopeFilter),
+    // with its own independently configurable attack/release (issue #25
+    // explicitly asks that gate ballistics not just reuse the compressor's
+    // own Attack/Release, since gates typically want a much faster attack
+    // and a slower, chatter-avoiding release than the compressor sitting in
+    // the same band). Applied as an additional multiplicative gain alongside
+    // the compressor's own VCA gain, keyed off the *same pre-compression
+    // input sample* the compressor's own envelope follower sees - so gating
+    // a band is never masked by (or interacting with) that band's own
+    // compression curve.
+    //
+    // Off by default: setGateEnabled(false) (the constructed default)
+    // smooths gateRatioSmoothed's target to 1.0 - GateGainComputer's own
+    // bit-exact bypass value, mirroring Range's "smooth to the bypass
+    // sentinel while disabled" idiom (see setRangeEnabled() above) rather
+    // than gating a separate boolean multiplier - so a band whose Gate API
+    // is never touched at all reproduces pre-v0.4.0 behaviour exactly.
+    void setGateEnabled (bool shouldBeEnabled) noexcept;
+    void setGateThresholdDb (float newThresholdDb);
+    void setGateRatio (float newRatio);
+    void setGateAttackMs (float newAttackMs);
+    void setGateReleaseMs (float newReleaseMs);
+
     // Per-band Mid/Side processing (v0.4.0, issue #24): encodes the band's
     // stereo signal to Mid/Side (src/dsp/MidSideCodec.h's equal-power,
     // exactly-invertible transform) immediately before the per-sample
@@ -202,6 +230,17 @@ private:
     // (see setRangeEnabled()/setRangeDb()'s definitions).
     bool rangeEnabled = false;
     float lastRangeDb = 12.0f;
+
+    // Downward expansion / gating (v0.4.0): a second, independent envelope
+    // follower (see setGateEnabled()'s doc comment above) plus its own
+    // smoothed threshold/ratio, re-applied once per block for the same
+    // real-time-safety reason as thresholdSmoothed/ratioSmoothed above.
+    juce::dsp::BallisticsFilter<float> gateEnvelopeFilter;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> gateThresholdSmoothed;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> gateRatioSmoothed;
+    bool gateEnabled = false;
+    float lastGateThresholdDb = -50.0f;
+    float lastGateRatio = 2.0f;
 
     // Per-band Mid/Side (v0.4.0): Side's own smoothed threshold/ratio - see
     // setMidSideEnabled()'s doc comment above for why Knee/Attack/Release/

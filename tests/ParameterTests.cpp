@@ -79,6 +79,41 @@ namespace
         checkFloatDefault (apvts, rangeId, 12.0f);
     }
 
+    // Downward expansion / gating (v0.4.0 / issue #25): off by default on
+    // every band, with reasoned musical defaults - see
+    // addGateParameters()'s doc comment in ParameterLayout.cpp.
+    struct GateDefaults
+    {
+        float thresholdDb;
+        float attackMs;
+        float releaseMs;
+    };
+
+    void checkGateParameters (juce::AudioProcessorValueTreeState& apvts,
+                               const char* gateEnabledId,
+                               const char* gateThresholdId,
+                               const char* gateRatioId,
+                               const char* gateAttackId,
+                               const char* gateReleaseId,
+                               const GateDefaults& defaults)
+    {
+        auto* enabledParam = dynamic_cast<juce::AudioParameterBool*> (apvts.getParameter (gateEnabledId));
+        REQUIRE (enabledParam != nullptr);
+        CHECK (enabledParam->get() == false);
+
+        checkFloatRange (apvts, gateThresholdId, -80.0f, 0.0f);
+        checkFloatDefault (apvts, gateThresholdId, defaults.thresholdDb);
+
+        checkFloatRange (apvts, gateRatioId, 1.0f, 100.0f);
+        checkFloatDefault (apvts, gateRatioId, 2.0f);
+
+        checkFloatRange (apvts, gateAttackId, 0.1f, 50.0f);
+        checkFloatDefault (apvts, gateAttackId, defaults.attackMs);
+
+        checkFloatRange (apvts, gateReleaseId, 10.0f, 2000.0f);
+        checkFloatDefault (apvts, gateReleaseId, defaults.releaseMs);
+    }
+
     // Per-band Mid/Side processing (v0.4.0 / issue #24): off by default;
     // Side Ratio defaults to 1:1 (bypass) so enabling M/S alone doesn't
     // silently change a band's sound until Side Ratio is actually raised -
@@ -147,6 +182,9 @@ TEST_CASE ("Processor instantiates with the expected parameters", "[processor][p
             ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midKnee, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
             ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highKnee, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
             ParamIDs::lowRangeEnabled, ParamIDs::lowRange, ParamIDs::midRangeEnabled, ParamIDs::midRange, ParamIDs::highRangeEnabled, ParamIDs::highRange,
+            ParamIDs::lowGateEnabled, ParamIDs::lowGateThreshold, ParamIDs::lowGateRatio, ParamIDs::lowGateAttack, ParamIDs::lowGateRelease,
+            ParamIDs::midGateEnabled, ParamIDs::midGateThreshold, ParamIDs::midGateRatio, ParamIDs::midGateAttack, ParamIDs::midGateRelease,
+            ParamIDs::highGateEnabled, ParamIDs::highGateThreshold, ParamIDs::highGateRatio, ParamIDs::highGateAttack, ParamIDs::highGateRelease,
             ParamIDs::lowMidSideEnabled, ParamIDs::lowSideThreshold, ParamIDs::lowSideRatio,
             ParamIDs::midMidSideEnabled, ParamIDs::midSideThreshold, ParamIDs::midSideRatio,
             ParamIDs::highMidSideEnabled, ParamIDs::highSideThreshold, ParamIDs::highSideRatio,
@@ -163,10 +201,11 @@ TEST_CASE ("Processor instantiates with the expected parameters", "[processor][p
     {
         // 2 splits + 3 bands * 6 (Threshold/Ratio/Knee/Attack/Release/Makeup
         // - Knee added in v0.2.0) + 3 bands * 2 (Range Enabled/Range - added
-        // in v0.3.0) + 3 bands * 3 (M/S Enabled/Side Threshold/Side Ratio -
-        // added in v0.4.0, issue #24) + 3 bands * 2 (Mute/Solo) + 2 (High
-        // limiter enable/threshold) + 1 output = 44.
-        CHECK (apvts.processor.getParameters().size() == 44);
+        // in v0.3.0) + 3 bands * 5 (Gate Enabled/Threshold/Ratio/Attack/
+        // Release - added in v0.4.0, issue #25) + 3 bands * 3 (M/S Enabled/
+        // Side Threshold/Side Ratio - added in v0.4.0, issue #24) + 3 bands
+        // * 2 (Mute/Solo) + 2 (High limiter enable/threshold) + 1 output = 59.
+        CHECK (apvts.processor.getParameters().size() == 59);
     }
 
     SECTION ("Range: off by default on every band, 0-30 dB range, 12 dB reasoned starting value (v0.3.0)")
@@ -174,6 +213,16 @@ TEST_CASE ("Processor instantiates with the expected parameters", "[processor][p
         checkRangeParameters (apvts, ParamIDs::lowRangeEnabled, ParamIDs::lowRange);
         checkRangeParameters (apvts, ParamIDs::midRangeEnabled, ParamIDs::midRange);
         checkRangeParameters (apvts, ParamIDs::highRangeEnabled, ParamIDs::highRange);
+    }
+
+    SECTION ("Gate: off by default on every band, reasoned per-band defaults (v0.4.0, issue #25)")
+    {
+        checkGateParameters (apvts, ParamIDs::lowGateEnabled, ParamIDs::lowGateThreshold, ParamIDs::lowGateRatio, ParamIDs::lowGateAttack, ParamIDs::lowGateRelease,
+                              { -50.0f, 10.0f, 200.0f });
+        checkGateParameters (apvts, ParamIDs::midGateEnabled, ParamIDs::midGateThreshold, ParamIDs::midGateRatio, ParamIDs::midGateAttack, ParamIDs::midGateRelease,
+                              { -55.0f, 5.0f, 150.0f });
+        checkGateParameters (apvts, ParamIDs::highGateEnabled, ParamIDs::highGateThreshold, ParamIDs::highGateRatio, ParamIDs::highGateAttack, ParamIDs::highGateRelease,
+                              { -45.0f, 2.0f, 100.0f });
     }
 
     SECTION ("Mid/Side: off by default on every band, Side Ratio bypassed at 1:1 (v0.4.0, issue #24)")

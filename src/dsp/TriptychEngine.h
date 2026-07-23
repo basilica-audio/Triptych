@@ -71,6 +71,12 @@ public:
     void setLowRangeEnabled (bool shouldBeEnabled) noexcept { lowBand.setRangeEnabled (shouldBeEnabled); }
     void setLowRangeDb (float newRangeDb) { lowBand.setRangeDb (newRangeDb); }
 
+    // Downward expansion / gating (v0.4.0, issue #25). See BandCompressor.h.
+    void setLowGateEnabled (bool shouldBeEnabled) noexcept { lowBand.setGateEnabled (shouldBeEnabled); }
+    void setLowGateThresholdDb (float newThresholdDb) { lowBand.setGateThresholdDb (newThresholdDb); }
+    void setLowGateRatio (float newRatio) { lowBand.setGateRatio (newRatio); }
+    void setLowGateAttackMs (float newAttackMs) { lowBand.setGateAttackMs (newAttackMs); }
+    void setLowGateReleaseMs (float newReleaseMs) { lowBand.setGateReleaseMs (newReleaseMs); }
     // Per-band Mid/Side processing (v0.4.0, issue #24). See BandCompressor.h.
     void setLowMidSideEnabled (bool shouldBeEnabled) noexcept { lowBand.setMidSideEnabled (shouldBeEnabled); }
     void setLowSideThresholdDb (float newThresholdDb) { lowBand.setSideThresholdDb (newThresholdDb); }
@@ -85,6 +91,11 @@ public:
     void setMidRangeEnabled (bool shouldBeEnabled) noexcept { midBand.setRangeEnabled (shouldBeEnabled); }
     void setMidRangeDb (float newRangeDb) { midBand.setRangeDb (newRangeDb); }
 
+    void setMidGateEnabled (bool shouldBeEnabled) noexcept { midBand.setGateEnabled (shouldBeEnabled); }
+    void setMidGateThresholdDb (float newThresholdDb) { midBand.setGateThresholdDb (newThresholdDb); }
+    void setMidGateRatio (float newRatio) { midBand.setGateRatio (newRatio); }
+    void setMidGateAttackMs (float newAttackMs) { midBand.setGateAttackMs (newAttackMs); }
+    void setMidGateReleaseMs (float newReleaseMs) { midBand.setGateReleaseMs (newReleaseMs); }
     void setMidMidSideEnabled (bool shouldBeEnabled) noexcept { midBand.setMidSideEnabled (shouldBeEnabled); }
     void setMidSideThresholdDb (float newThresholdDb) { midBand.setSideThresholdDb (newThresholdDb); }
     void setMidSideRatio (float newRatio) { midBand.setSideRatio (newRatio); }
@@ -98,6 +109,11 @@ public:
     void setHighRangeEnabled (bool shouldBeEnabled) noexcept { highBand.setRangeEnabled (shouldBeEnabled); }
     void setHighRangeDb (float newRangeDb) { highBand.setRangeDb (newRangeDb); }
 
+    void setHighGateEnabled (bool shouldBeEnabled) noexcept { highBand.setGateEnabled (shouldBeEnabled); }
+    void setHighGateThresholdDb (float newThresholdDb) { highBand.setGateThresholdDb (newThresholdDb); }
+    void setHighGateRatio (float newRatio) { highBand.setGateRatio (newRatio); }
+    void setHighGateAttackMs (float newAttackMs) { highBand.setGateAttackMs (newAttackMs); }
+    void setHighGateReleaseMs (float newReleaseMs) { highBand.setGateReleaseMs (newReleaseMs); }
     void setHighMidSideEnabled (bool shouldBeEnabled) noexcept { highBand.setMidSideEnabled (shouldBeEnabled); }
     void setHighSideThresholdDb (float newThresholdDb) { highBand.setSideThresholdDb (newThresholdDb); }
     void setHighSideRatio (float newRatio) { highBand.setSideRatio (newRatio); }

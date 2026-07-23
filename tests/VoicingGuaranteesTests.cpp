@@ -236,6 +236,41 @@ TEST_CASE ("Voicing: attack settling time follows lowAttack > midAttack > highAt
     CHECK (midSettling > highSettling);
 }
 
+// v0.4.0 (issue #25): the gate's own Attack/Release defaults follow the same
+// per-band ordering invariant as the compressor's own (see the two tests
+// above) - a direct default-value check, not a settling-time proxy (the gate
+// stage's ballistics are exercised via BandCompressorTests.cpp's dedicated
+// gate tests instead).
+TEST_CASE ("Voicing: Gate Attack/Release defaults follow lowGate > midGate > highGate (issue #25)", "[voicing][gate][regression]")
+{
+    TriptychAudioProcessor processor;
+
+    const auto lowGateAttackMs = defaultOf (processor.apvts, ParamIDs::lowGateAttack);
+    const auto midGateAttackMs = defaultOf (processor.apvts, ParamIDs::midGateAttack);
+    const auto highGateAttackMs = defaultOf (processor.apvts, ParamIDs::highGateAttack);
+
+    CHECK (lowGateAttackMs > midGateAttackMs);
+    CHECK (midGateAttackMs > highGateAttackMs);
+
+    const auto lowGateReleaseMs = defaultOf (processor.apvts, ParamIDs::lowGateRelease);
+    const auto midGateReleaseMs = defaultOf (processor.apvts, ParamIDs::midGateRelease);
+    const auto highGateReleaseMs = defaultOf (processor.apvts, ParamIDs::highGateRelease);
+
+    CHECK (lowGateReleaseMs > midGateReleaseMs);
+    CHECK (midGateReleaseMs > highGateReleaseMs);
+
+    // Gate Threshold defaults sit well below each band's own compressor
+    // Threshold default (issue #25's own recommendation - "well below the
+    // compressor's own Threshold").
+    const auto lowGateThresholdDb = defaultOf (processor.apvts, ParamIDs::lowGateThreshold);
+    const auto midGateThresholdDb = defaultOf (processor.apvts, ParamIDs::midGateThreshold);
+    const auto highGateThresholdDb = defaultOf (processor.apvts, ParamIDs::highGateThreshold);
+
+    CHECK (lowGateThresholdDb < defaultOf (processor.apvts, ParamIDs::lowThreshold));
+    CHECK (midGateThresholdDb < defaultOf (processor.apvts, ParamIDs::midThreshold));
+    CHECK (highGateThresholdDb < defaultOf (processor.apvts, ParamIDs::highThreshold));
+}
+
 TEST_CASE ("Voicing: release settling time follows lowRelease > midRelease > highRelease (design-brief.md guarantee #5)", "[voicing][regression]")
 {
     TriptychAudioProcessor processor;

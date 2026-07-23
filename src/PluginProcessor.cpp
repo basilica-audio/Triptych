@@ -72,6 +72,12 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     lowRangeEnabledOn = apvts.getRawParameterValue (ParamIDs::lowRangeEnabled);
     lowRangeDb = apvts.getRawParameterValue (ParamIDs::lowRange);
 
+    lowGateEnabledOn = apvts.getRawParameterValue (ParamIDs::lowGateEnabled);
+    lowGateThresholdDb = apvts.getRawParameterValue (ParamIDs::lowGateThreshold);
+    lowGateRatio = apvts.getRawParameterValue (ParamIDs::lowGateRatio);
+    lowGateAttackMs = apvts.getRawParameterValue (ParamIDs::lowGateAttack);
+    lowGateReleaseMs = apvts.getRawParameterValue (ParamIDs::lowGateRelease);
+
     midThresholdDb = apvts.getRawParameterValue (ParamIDs::midThreshold);
     midRatio = apvts.getRawParameterValue (ParamIDs::midRatio);
     midKneePercent = apvts.getRawParameterValue (ParamIDs::midKnee);
@@ -81,6 +87,12 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     midRangeEnabledOn = apvts.getRawParameterValue (ParamIDs::midRangeEnabled);
     midRangeDb = apvts.getRawParameterValue (ParamIDs::midRange);
 
+    midGateEnabledOn = apvts.getRawParameterValue (ParamIDs::midGateEnabled);
+    midGateThresholdDb = apvts.getRawParameterValue (ParamIDs::midGateThreshold);
+    midGateRatio = apvts.getRawParameterValue (ParamIDs::midGateRatio);
+    midGateAttackMs = apvts.getRawParameterValue (ParamIDs::midGateAttack);
+    midGateReleaseMs = apvts.getRawParameterValue (ParamIDs::midGateRelease);
+
     highThresholdDb = apvts.getRawParameterValue (ParamIDs::highThreshold);
     highRatio = apvts.getRawParameterValue (ParamIDs::highRatio);
     highKneePercent = apvts.getRawParameterValue (ParamIDs::highKnee);
@@ -89,6 +101,12 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     highMakeupDb = apvts.getRawParameterValue (ParamIDs::highMakeup);
     highRangeEnabledOn = apvts.getRawParameterValue (ParamIDs::highRangeEnabled);
     highRangeDb = apvts.getRawParameterValue (ParamIDs::highRange);
+
+    highGateEnabledOn = apvts.getRawParameterValue (ParamIDs::highGateEnabled);
+    highGateThresholdDb = apvts.getRawParameterValue (ParamIDs::highGateThreshold);
+    highGateRatio = apvts.getRawParameterValue (ParamIDs::highGateRatio);
+    highGateAttackMs = apvts.getRawParameterValue (ParamIDs::highGateAttack);
+    highGateReleaseMs = apvts.getRawParameterValue (ParamIDs::highGateRelease);
 
     lowMuteOn = apvts.getRawParameterValue (ParamIDs::lowMute);
     lowSoloOn = apvts.getRawParameterValue (ParamIDs::lowSolo);
@@ -112,6 +130,11 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     jassert (lowMakeupDb != nullptr);
     jassert (lowRangeEnabledOn != nullptr);
     jassert (lowRangeDb != nullptr);
+    jassert (lowGateEnabledOn != nullptr);
+    jassert (lowGateThresholdDb != nullptr);
+    jassert (lowGateRatio != nullptr);
+    jassert (lowGateAttackMs != nullptr);
+    jassert (lowGateReleaseMs != nullptr);
     jassert (midThresholdDb != nullptr);
     jassert (midRatio != nullptr);
     jassert (midKneePercent != nullptr);
@@ -120,6 +143,11 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     jassert (midMakeupDb != nullptr);
     jassert (midRangeEnabledOn != nullptr);
     jassert (midRangeDb != nullptr);
+    jassert (midGateEnabledOn != nullptr);
+    jassert (midGateThresholdDb != nullptr);
+    jassert (midGateRatio != nullptr);
+    jassert (midGateAttackMs != nullptr);
+    jassert (midGateReleaseMs != nullptr);
     jassert (highThresholdDb != nullptr);
     jassert (highRatio != nullptr);
     jassert (highKneePercent != nullptr);
@@ -128,6 +156,11 @@ TriptychAudioProcessor::TriptychAudioProcessor()
     jassert (highMakeupDb != nullptr);
     jassert (highRangeEnabledOn != nullptr);
     jassert (highRangeDb != nullptr);
+    jassert (highGateEnabledOn != nullptr);
+    jassert (highGateThresholdDb != nullptr);
+    jassert (highGateRatio != nullptr);
+    jassert (highGateAttackMs != nullptr);
+    jassert (highGateReleaseMs != nullptr);
     jassert (lowMuteOn != nullptr);
     jassert (lowSoloOn != nullptr);
     jassert (midMuteOn != nullptr);
@@ -216,6 +249,12 @@ void TriptychAudioProcessor::pushParametersToEngine()
     engine.setLowRangeEnabled (lowRangeEnabledOn->load (std::memory_order_relaxed) > 0.5f);
     engine.setLowRangeDb (lowRangeDb->load (std::memory_order_relaxed));
 
+    engine.setLowGateEnabled (lowGateEnabledOn->load (std::memory_order_relaxed) > 0.5f);
+    engine.setLowGateThresholdDb (lowGateThresholdDb->load (std::memory_order_relaxed));
+    engine.setLowGateRatio (lowGateRatio->load (std::memory_order_relaxed));
+    engine.setLowGateAttackMs (lowGateAttackMs->load (std::memory_order_relaxed));
+    engine.setLowGateReleaseMs (lowGateReleaseMs->load (std::memory_order_relaxed));
+
     engine.setMidThresholdDb (midThresholdDb->load (std::memory_order_relaxed));
     engine.setMidRatio (midRatio->load (std::memory_order_relaxed));
     engine.setMidKneePercent (midKneePercent->load (std::memory_order_relaxed));
@@ -225,6 +264,12 @@ void TriptychAudioProcessor::pushParametersToEngine()
     engine.setMidRangeEnabled (midRangeEnabledOn->load (std::memory_order_relaxed) > 0.5f);
     engine.setMidRangeDb (midRangeDb->load (std::memory_order_relaxed));
 
+    engine.setMidGateEnabled (midGateEnabledOn->load (std::memory_order_relaxed) > 0.5f);
+    engine.setMidGateThresholdDb (midGateThresholdDb->load (std::memory_order_relaxed));
+    engine.setMidGateRatio (midGateRatio->load (std::memory_order_relaxed));
+    engine.setMidGateAttackMs (midGateAttackMs->load (std::memory_order_relaxed));
+    engine.setMidGateReleaseMs (midGateReleaseMs->load (std::memory_order_relaxed));
+
     engine.setHighThresholdDb (highThresholdDb->load (std::memory_order_relaxed));
     engine.setHighRatio (highRatio->load (std::memory_order_relaxed));
     engine.setHighKneePercent (highKneePercent->load (std::memory_order_relaxed));
@@ -233,6 +278,12 @@ void TriptychAudioProcessor::pushParametersToEngine()
     engine.setHighMakeupDb (highMakeupDb->load (std::memory_order_relaxed));
     engine.setHighRangeEnabled (highRangeEnabledOn->load (std::memory_order_relaxed) > 0.5f);
     engine.setHighRangeDb (highRangeDb->load (std::memory_order_relaxed));
+
+    engine.setHighGateEnabled (highGateEnabledOn->load (std::memory_order_relaxed) > 0.5f);
+    engine.setHighGateThresholdDb (highGateThresholdDb->load (std::memory_order_relaxed));
+    engine.setHighGateRatio (highGateRatio->load (std::memory_order_relaxed));
+    engine.setHighGateAttackMs (highGateAttackMs->load (std::memory_order_relaxed));
+    engine.setHighGateReleaseMs (highGateReleaseMs->load (std::memory_order_relaxed));
 
     engine.setLowMute (lowMuteOn->load (std::memory_order_relaxed) > 0.5f);
     engine.setLowSolo (lowSoloOn->load (std::memory_order_relaxed) > 0.5f);

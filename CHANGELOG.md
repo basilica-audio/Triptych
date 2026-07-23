@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Downward expansion / gating** (GitHub issue #25): an independent, per-band noise-gate/expander stage with its own Threshold (`lowGateThreshold`/`midGateThreshold`/`highGateThreshold`, -80 to 0 dB), Ratio (`lowGateRatio` et al., 1:1-100:1, default 2:1), Attack (`lowGateAttack` et al., 0.1-50 ms), and Release (`lowGateRelease` et al., 10-2000 ms), plus a per-band `xGateEnabled` toggle (default off). Reuses the existing `juce::dsp::BallisticsFilter`-based detector topology (a second, independently configured instance) rather than a structurally different detection method, and is keyed off the same pre-compression input sample as the band's own compressor, so gating a band is never masked by, or interacting with, that band's own compression curve. See `docs/architecture.md`'s "Downward expansion / gating (v0.4.0)" section and `src/dsp/GateGainComputer.h` for the sourced transfer-curve model (the standard downward expander).
+- Editor: a `Gate On` toggle plus Gate Threshold/Ratio/Attack/Release knobs added to every band's control column.
+- All eight factory presets gain the fifteen new Gate parameter keys at their neutral (off) defaults - none of the eight presets engage gating.
+- Test suite broadened from 84 to 96 test cases: pure transfer-curve coverage for the gate's closed-form expander formula (`tests/GateGainComputerTests.cpp`), real-audio gain-reduction/regression/bypass-identity coverage (`tests/BandCompressorTests.cpp`), a v0.3.0-to-v0.4.0 state migration-tolerance test, a per-band Gate default-ordering regression guarantee, and updated parameter-count/round-trip coverage.
+
 ## [0.3.0] - 2026-07-17
 
 ### Added

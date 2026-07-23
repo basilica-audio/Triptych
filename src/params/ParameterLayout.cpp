@@ -153,6 +153,82 @@ namespace
             12.0f,
             juce::AudioParameterFloatAttributes().withLabel ("dB")));
     }
+
+    // Downward expansion / gating (v0.4.0 / GitHub issue #25): an
+    // independent noise-gate/expander stage per band, off by default so
+    // adding these parameters never changes existing default behaviour. See
+    // src/dsp/GateGainComputer.h for the transfer-curve math this drives.
+    //
+    // Threshold: -80 to 0 dB, deeper than the compressor's own -60 to 0 dB
+    // range - a gate threshold is meant to sit "well below the compressor's
+    // own Threshold" (issue #25), so it needs headroom to reach further into
+    // the noise floor. Per-band defaults sit comfortably below each band's
+    // own compressor Threshold default (Low -24, Mid -30, High -20 dB - see
+    // addBandParameters() above).
+    //
+    // Ratio: 1:1 (bypass) to 100:1 (a near-hard gate) - deliberately not the
+    // compressor's own 0.2-20 range (there is no "upward" side for a gate),
+    // with a centre-skew around 4:1 so gentler, more common expansion
+    // ratios get proportionally more knob travel than the hard-gate extreme.
+    // Default 2:1 on every band: a gentle, musically conservative downward
+    // expander that reduces bleed/noise without the audible pumping a much
+    // steeper ratio risks - no sourced per-band difference found for this
+    // (mirroring Knee/Makeup's uniform-default reasoning above).
+    //
+    // Attack: 0.1-50 ms - tighter than the compressor's own 0.1-100 ms
+    // ceiling, since a gate's attack is conventionally much faster than a
+    // compressor's (Zolzer's DAFX gate/expander treatment). Release:
+    // 10-2000 ms - a wider ceiling than the compressor's own 1000 ms, since
+    // a gate's release commonly needs to be slow to avoid audible chatter
+    // when the input hovers near the threshold. Per-band Attack/Release
+    // defaults follow the same ordering invariant as the compressor's own
+    // (lowGateAttack > midGateAttack > highGateAttack; lowGateRelease >
+    // midGateRelease > highGateRelease - see tests/VoicingGuaranteesTests.cpp).
+    void addGateParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout,
+                             const char* gateEnabledId,
+                             const char* gateThresholdId,
+                             const char* gateRatioId,
+                             const char* gateAttackId,
+                             const char* gateReleaseId,
+                             const juce::String& labelPrefix,
+                             float gateThresholdDefaultDb,
+                             float gateAttackDefaultMs,
+                             float gateReleaseDefaultMs)
+    {
+        layout.add (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { gateEnabledId, 1 }, labelPrefix + " Gate Enabled", false));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { gateThresholdId, 1 },
+            labelPrefix + " Gate Threshold",
+            juce::NormalisableRange<float> (-80.0f, 0.0f, 0.01f),
+            gateThresholdDefaultDb,
+            juce::AudioParameterFloatAttributes().withLabel ("dB")));
+
+        auto gateRatioRange = juce::NormalisableRange<float> (1.0f, 100.0f, 0.01f);
+        gateRatioRange.setSkewForCentre (4.0f);
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { gateRatioId, 1 },
+            labelPrefix + " Gate Ratio",
+            gateRatioRange,
+            2.0f,
+            juce::AudioParameterFloatAttributes().withLabel (":1")));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { gateAttackId, 1 },
+            labelPrefix + " Gate Attack",
+            makeLogRange (0.1f, 50.0f),
+            gateAttackDefaultMs,
+            juce::AudioParameterFloatAttributes().withLabel ("ms")));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { gateReleaseId, 1 },
+            labelPrefix + " Gate Release",
+            makeLogRange (10.0f, 2000.0f),
+            gateReleaseDefaultMs,
+            juce::AudioParameterFloatAttributes().withLabel ("ms")));
+    }
 }
 
 namespace trpt
@@ -237,6 +313,24 @@ namespace trpt
             juce::NormalisableRange<float> (-24.0f, 0.0f, 0.01f),
             -3.0f,
             juce::AudioParameterFloatAttributes().withLabel ("dB")));
+
+        //======================================================================
+        // Downward expansion / gating (v0.4.0 / issue #25). See
+        // addGateParameters()'s doc comment above.
+        addGateParameters (layout,
+                            ParamIDs::lowGateEnabled, ParamIDs::lowGateThreshold, ParamIDs::lowGateRatio, ParamIDs::lowGateAttack, ParamIDs::lowGateRelease,
+                            "Low",
+                            -50.0f, 10.0f, 200.0f);
+
+        addGateParameters (layout,
+                            ParamIDs::midGateEnabled, ParamIDs::midGateThreshold, ParamIDs::midGateRatio, ParamIDs::midGateAttack, ParamIDs::midGateRelease,
+                            "Mid",
+                            -55.0f, 5.0f, 150.0f);
+
+        addGateParameters (layout,
+                            ParamIDs::highGateEnabled, ParamIDs::highGateThreshold, ParamIDs::highGateRatio, ParamIDs::highGateAttack, ParamIDs::highGateRelease,
+                            "High",
+                            -45.0f, 2.0f, 100.0f);
 
         //======================================================================
         // Output: master trim after the three bands are summed, -24 to +24 dB.

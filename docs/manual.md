@@ -63,6 +63,18 @@ Each band's own compressor (Knee → Threshold/Ratio → Range → Attack/Releas
 | **Range On** (Range Enabled) | Off / On | Off | Engages the band's maximum gain-change clamp. Off by default, so the band's Ratio/Knee curve behaves exactly as the table above describes with no ceiling on how far it can push gain up or down. |
 | **Range** | 0 – 30 | 12 | dB | The maximum gain change (cut *or* boost) the band's compressor is allowed to apply, once Range On is engaged. This is what makes an aggressive Ratio setting - especially a strongly upward (well below 1:1) one, whose boost otherwise grows without bound the further above Threshold the signal sits - stay musically usable rather than a runaway. Only takes effect while Range On is engaged; the dB value itself has no effect while it's off. |
 
+### Per-band Gate / downward expander *(new in v0.4.0)*
+
+| Parameter | Range | Low default | Mid default | High default | Unit | What it does |
+|---|---|---|---|---|---|---|
+| **Gate On** (Gate Enabled) | Off / On | Off | Off | Off | | Engages the band's independent downward expander/gate. Off by default, so the band behaves exactly as the compressor tables above describe with no gating applied at all. |
+| **Gate Threshold** | -80 – 0 | -50 | -55 | -45 | dB | The level *below* which the gate starts attenuating - deliberately a separate, independent threshold from the compressor's own Threshold above (typically set well below it, so the gate only reaches into genuinely quiet material/noise floor, not the program material the compressor is shaping). |
+| **Gate Ratio** | 1:1 – 100:1 | 2:1 | 2:1 | 2:1 | : 1 | How hard the gate attenuates once below Gate Threshold. 1:1 is an exact bypass; higher ratios attenuate more steeply per dB below threshold (100:1 approaches a hard, on/off-style gate). |
+| **Gate Attack** | 0.1 – 50 | 10 | 5 | 2 | ms | How quickly the gate opens back up once the signal rises back above Gate Threshold - deliberately a faster ceiling than the compressor's own Attack, since a gate typically needs to react quickly to avoid clipping the front of a transient. |
+| **Gate Release** | 10 – 2000 | 200 | 150 | 100 | ms | How quickly the gate closes once the signal drops below Gate Threshold - deliberately a slower ceiling than the compressor's own Release, since a gate closing too fast on material hovering near the threshold causes audible chatter. |
+
+The gate runs independently of, and in parallel with, that band's own compressor - both are keyed off the same input signal and their gains multiply together, so gating a band is never masked by (or fighting against) that band's own compression curve. Because toggling Gate On is a musical decision rather than a continuous control, expect it to behave like any gate: set Gate Threshold below the quietest material you want to keep, and Gate Ratio/Attack/Release to taste for how aggressively and quickly it should react.
+
 ### Per-band Mute / Solo (Low, Mid, High)
 
 | Parameter | Values | Default | What it does |

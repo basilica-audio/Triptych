@@ -77,6 +77,13 @@ private:
     std::atomic<float>* lowRangeEnabledOn = nullptr;
     std::atomic<float>* lowRangeDb = nullptr;
 
+    // Downward expansion / gating (v0.4.0, issue #25).
+    std::atomic<float>* lowGateEnabledOn = nullptr;
+    std::atomic<float>* lowGateThresholdDb = nullptr;
+    std::atomic<float>* lowGateRatio = nullptr;
+    std::atomic<float>* lowGateAttackMs = nullptr;
+    std::atomic<float>* lowGateReleaseMs = nullptr;
+
     std::atomic<float>* midThresholdDb = nullptr;
     std::atomic<float>* midRatio = nullptr;
     std::atomic<float>* midKneePercent = nullptr;
@@ -86,6 +93,12 @@ private:
     std::atomic<float>* midRangeEnabledOn = nullptr;
     std::atomic<float>* midRangeDb = nullptr;
 
+    std::atomic<float>* midGateEnabledOn = nullptr;
+    std::atomic<float>* midGateThresholdDb = nullptr;
+    std::atomic<float>* midGateRatio = nullptr;
+    std::atomic<float>* midGateAttackMs = nullptr;
+    std::atomic<float>* midGateReleaseMs = nullptr;
+
     std::atomic<float>* highThresholdDb = nullptr;
     std::atomic<float>* highRatio = nullptr;
     std::atomic<float>* highKneePercent = nullptr;
@@ -94,6 +107,12 @@ private:
     std::atomic<float>* highMakeupDb = nullptr;
     std::atomic<float>* highRangeEnabledOn = nullptr;
     std::atomic<float>* highRangeDb = nullptr;
+
+    std::atomic<float>* highGateEnabledOn = nullptr;
+    std::atomic<float>* highGateThresholdDb = nullptr;
+    std::atomic<float>* highGateRatio = nullptr;
+    std::atomic<float>* highGateAttackMs = nullptr;
+    std::atomic<float>* highGateReleaseMs = nullptr;
 
     // Per-band Mute/Solo (M1). AudioParameterBool's raw APVTS value is
     // 0.0f/1.0f, thresholded at 0.5f in pushParametersToEngine() - the same

@@ -17,14 +17,19 @@ namespace
     constexpr int rowHeight = labelHeight + knobSize + textBoxHeight;
     constexpr int presetBarHeight = 28;
     constexpr int numBandKnobRows = 6; // Threshold/Ratio/Knee/Attack/Release/Makeup (Knee added in v0.2.0)
+    constexpr int numGateKnobRows = 4; // Gate Threshold/Ratio/Attack/Release (v0.4.0, issue #25)
 
     constexpr int editorWidth = margin * 2 + numColumns * knobSize + (numColumns + 1) * margin;
 
     // Preset bar + top strip + band labels + Mute/Solo row + band knob rows
     // + each band's own Range enable-toggle row and Range-knob row (v0.3.0)
-    // + the High-band limiter option's own toggle row and threshold-knob row.
+    // + each band's own Gate enable-toggle row and four Gate knob rows
+    // (v0.4.0, issue #25) + the High-band limiter option's own toggle row
+    // and threshold-knob row.
     constexpr int editorHeight = margin + presetBarHeight + margin + rowHeight + margin + bandLabelHeight + toggleRowHeight
-                                  + numBandKnobRows * rowHeight + toggleRowHeight + rowHeight + margin + toggleRowHeight + rowHeight + margin;
+                                  + numBandKnobRows * rowHeight + toggleRowHeight + rowHeight
+                                  + toggleRowHeight + numGateKnobRows * rowHeight
+                                  + margin + toggleRowHeight + rowHeight + margin;
 
     // M2 i18n frame (.scaffold/specs/preset-system-m2.md): selects German
     // (resources/i18n/de.txt) or falls through to English, once, at editor
@@ -69,6 +74,11 @@ TriptychAudioProcessorEditor::TriptychAudioProcessorEditor (TriptychAudioProcess
     configureKnob (lowControls.makeup, ParamIDs::lowMakeup, "Makeup");
     configureToggle (lowControls.rangeEnabled, ParamIDs::lowRangeEnabled, "Range On");
     configureKnob (lowControls.range, ParamIDs::lowRange, "Range");
+    configureToggle (lowControls.gateEnabled, ParamIDs::lowGateEnabled, "Gate On");
+    configureKnob (lowControls.gateThreshold, ParamIDs::lowGateThreshold, "Gate Thresh");
+    configureKnob (lowControls.gateRatio, ParamIDs::lowGateRatio, "Gate Ratio");
+    configureKnob (lowControls.gateAttack, ParamIDs::lowGateAttack, "Gate Attack");
+    configureKnob (lowControls.gateRelease, ParamIDs::lowGateRelease, "Gate Release");
 
     configureToggle (midControls.mute, ParamIDs::midMute, "Mute");
     configureToggle (midControls.solo, ParamIDs::midSolo, "Solo");
@@ -80,6 +90,11 @@ TriptychAudioProcessorEditor::TriptychAudioProcessorEditor (TriptychAudioProcess
     configureKnob (midControls.makeup, ParamIDs::midMakeup, "Makeup");
     configureToggle (midControls.rangeEnabled, ParamIDs::midRangeEnabled, "Range On");
     configureKnob (midControls.range, ParamIDs::midRange, "Range");
+    configureToggle (midControls.gateEnabled, ParamIDs::midGateEnabled, "Gate On");
+    configureKnob (midControls.gateThreshold, ParamIDs::midGateThreshold, "Gate Thresh");
+    configureKnob (midControls.gateRatio, ParamIDs::midGateRatio, "Gate Ratio");
+    configureKnob (midControls.gateAttack, ParamIDs::midGateAttack, "Gate Attack");
+    configureKnob (midControls.gateRelease, ParamIDs::midGateRelease, "Gate Release");
 
     configureToggle (highControls.mute, ParamIDs::highMute, "Mute");
     configureToggle (highControls.solo, ParamIDs::highSolo, "Solo");
@@ -91,6 +106,11 @@ TriptychAudioProcessorEditor::TriptychAudioProcessorEditor (TriptychAudioProcess
     configureKnob (highControls.makeup, ParamIDs::highMakeup, "Makeup");
     configureToggle (highControls.rangeEnabled, ParamIDs::highRangeEnabled, "Range On");
     configureKnob (highControls.range, ParamIDs::highRange, "Range");
+    configureToggle (highControls.gateEnabled, ParamIDs::highGateEnabled, "Gate On");
+    configureKnob (highControls.gateThreshold, ParamIDs::highGateThreshold, "Gate Thresh");
+    configureKnob (highControls.gateRatio, ParamIDs::highGateRatio, "Gate Ratio");
+    configureKnob (highControls.gateAttack, ParamIDs::highGateAttack, "Gate Attack");
+    configureKnob (highControls.gateRelease, ParamIDs::highGateRelease, "Gate Release");
 
     configureToggle (highLimiterEnabledToggle, ParamIDs::highLimiterEnabled, "Limiter");
     configureKnob (highLimiterThresholdKnob, ParamIDs::highLimiterThreshold, "Lim. Thresh");
@@ -202,7 +222,21 @@ void TriptychAudioProcessorEditor::resized()
     highControls.rangeEnabled.button.setBounds (highColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
     highControls.range.slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
 
-    // High-band limiter option (M1): High column only, below its Range row.
+    // Downward expansion / gating (v0.4.0, issue #25): every band, directly
+    // below its Range row.
+    lowControls.gateEnabled.button.setBounds (lowColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    for (auto* knob : { &lowControls.gateThreshold, &lowControls.gateRatio, &lowControls.gateAttack, &lowControls.gateRelease })
+        knob->slider.setBounds (lowColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    midControls.gateEnabled.button.setBounds (midColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    for (auto* knob : { &midControls.gateThreshold, &midControls.gateRatio, &midControls.gateAttack, &midControls.gateRelease })
+        knob->slider.setBounds (midColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    highControls.gateEnabled.button.setBounds (highColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    for (auto* knob : { &highControls.gateThreshold, &highControls.gateRatio, &highControls.gateAttack, &highControls.gateRelease })
+        knob->slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    // High-band limiter option (M1): High column only, below its Gate rows.
     highLimiterEnabledToggle.button.setBounds (highColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
     highLimiterThresholdKnob.slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
 }

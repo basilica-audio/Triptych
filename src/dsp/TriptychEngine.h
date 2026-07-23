@@ -71,6 +71,13 @@ public:
     void setLowRangeEnabled (bool shouldBeEnabled) noexcept { lowBand.setRangeEnabled (shouldBeEnabled); }
     void setLowRangeDb (float newRangeDb) { lowBand.setRangeDb (newRangeDb); }
 
+    // Downward expansion / gating (v0.4.0, issue #25). See BandCompressor.h.
+    void setLowGateEnabled (bool shouldBeEnabled) noexcept { lowBand.setGateEnabled (shouldBeEnabled); }
+    void setLowGateThresholdDb (float newThresholdDb) { lowBand.setGateThresholdDb (newThresholdDb); }
+    void setLowGateRatio (float newRatio) { lowBand.setGateRatio (newRatio); }
+    void setLowGateAttackMs (float newAttackMs) { lowBand.setGateAttackMs (newAttackMs); }
+    void setLowGateReleaseMs (float newReleaseMs) { lowBand.setGateReleaseMs (newReleaseMs); }
+
     void setMidThresholdDb (float newThresholdDb) { midBand.setThresholdDb (newThresholdDb); }
     void setMidRatio (float newRatio) { midBand.setRatio (newRatio); }
     void setMidKneePercent (float newKneePercent) { midBand.setKneePercent (newKneePercent); }
@@ -80,6 +87,12 @@ public:
     void setMidRangeEnabled (bool shouldBeEnabled) noexcept { midBand.setRangeEnabled (shouldBeEnabled); }
     void setMidRangeDb (float newRangeDb) { midBand.setRangeDb (newRangeDb); }
 
+    void setMidGateEnabled (bool shouldBeEnabled) noexcept { midBand.setGateEnabled (shouldBeEnabled); }
+    void setMidGateThresholdDb (float newThresholdDb) { midBand.setGateThresholdDb (newThresholdDb); }
+    void setMidGateRatio (float newRatio) { midBand.setGateRatio (newRatio); }
+    void setMidGateAttackMs (float newAttackMs) { midBand.setGateAttackMs (newAttackMs); }
+    void setMidGateReleaseMs (float newReleaseMs) { midBand.setGateReleaseMs (newReleaseMs); }
+
     void setHighThresholdDb (float newThresholdDb) { highBand.setThresholdDb (newThresholdDb); }
     void setHighRatio (float newRatio) { highBand.setRatio (newRatio); }
     void setHighKneePercent (float newKneePercent) { highBand.setKneePercent (newKneePercent); }
@@ -88,6 +101,12 @@ public:
     void setHighMakeupDb (float newMakeupDb) { highBand.setMakeupDb (newMakeupDb); }
     void setHighRangeEnabled (bool shouldBeEnabled) noexcept { highBand.setRangeEnabled (shouldBeEnabled); }
     void setHighRangeDb (float newRangeDb) { highBand.setRangeDb (newRangeDb); }
+
+    void setHighGateEnabled (bool shouldBeEnabled) noexcept { highBand.setGateEnabled (shouldBeEnabled); }
+    void setHighGateThresholdDb (float newThresholdDb) { highBand.setGateThresholdDb (newThresholdDb); }
+    void setHighGateRatio (float newRatio) { highBand.setGateRatio (newRatio); }
+    void setHighGateAttackMs (float newAttackMs) { highBand.setGateAttackMs (newAttackMs); }
+    void setHighGateReleaseMs (float newReleaseMs) { highBand.setGateReleaseMs (newReleaseMs); }
 
     // High-band limiter option (M1). See BandCompressor::setLimiterEnabled
     // for why toggling this is real-time safe with no added latency.

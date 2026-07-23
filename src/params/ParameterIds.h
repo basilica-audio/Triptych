@@ -88,4 +88,33 @@ namespace ParamIDs
 
     // Master output trim, applied after the three bands are summed.
     inline constexpr auto output = "output";
+
+    // Downward expansion / gating (v0.4.0 / GitHub issue #25): an
+    // independent, per-band noise-gate/expander stage with its own
+    // threshold/ratio/attack/release, reusing the same BallisticsFilter
+    // detector topology as the compressor above rather than a second,
+    // structurally different detection method (see
+    // src/dsp/BandCompressor.h/GateGainComputer.h). `xGateEnabled` defaults
+    // to off so adding these fifteen IDs never changes existing default
+    // behaviour - a v0.3.0-shaped session/preset import resolves to gate
+    // disabled on every band with every other gate value at its declared
+    // default, the same tolerant-migration mechanism as the v0.2.0 Knee and
+    // v0.3.0 Range additions (see tests/StateTests.cpp).
+    inline constexpr auto lowGateEnabled = "lowGateEnabled";
+    inline constexpr auto lowGateThreshold = "lowGateThreshold";
+    inline constexpr auto lowGateRatio = "lowGateRatio";
+    inline constexpr auto lowGateAttack = "lowGateAttack";
+    inline constexpr auto lowGateRelease = "lowGateRelease";
+
+    inline constexpr auto midGateEnabled = "midGateEnabled";
+    inline constexpr auto midGateThreshold = "midGateThreshold";
+    inline constexpr auto midGateRatio = "midGateRatio";
+    inline constexpr auto midGateAttack = "midGateAttack";
+    inline constexpr auto midGateRelease = "midGateRelease";
+
+    inline constexpr auto highGateEnabled = "highGateEnabled";
+    inline constexpr auto highGateThreshold = "highGateThreshold";
+    inline constexpr auto highGateRatio = "highGateRatio";
+    inline constexpr auto highGateAttack = "highGateAttack";
+    inline constexpr auto highGateRelease = "highGateRelease";
 }

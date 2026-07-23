@@ -1,6 +1,8 @@
 # Factory presets
 
-Eight factory presets ship with Triptych (`presets/factory/*.json`, embedded via BinaryData - see `docs/preset-system-notes.md` in `basilica-audio/nave`, the M2 preset system's pilot implementation, for the file format and wiring this repo copied). Every preset is a settings snapshot over the existing parameter set - no bespoke DSP beyond the v0.2.0 Knee and v0.3.0 Ratio-range/Range additions. See `docs/design-brief.md` (v0.2.0 soft-knee) and `docs/design-brief-v3-dynamics.md` (v0.3.0 upward compression/Range) for the full research-derived rationale, and `docs/research-notes.md` for the sourced numbers each preset draws on.
+Eight factory presets ship with Triptych (`presets/factory/*.json`, embedded via BinaryData - see `docs/preset-system-notes.md` in `basilica-audio/nave`, the M2 preset system's pilot implementation, for the file format and wiring this repo copied). Every preset is a settings snapshot over the existing parameter set - no bespoke DSP beyond the v0.2.0 Knee, v0.3.0 Ratio-range/Range, and v0.4.0 Gate additions. See `docs/design-brief.md` (v0.2.0 soft-knee), `docs/design-brief-v3-dynamics.md` (v0.3.0 upward compression/Range), and `docs/architecture.md` (v0.4.0 downward expansion/gating, issue #25) for the full research-derived rationale, and `docs/research-notes.md` for the sourced numbers each preset draws on.
+
+**v0.4.0**: all eight presets gain the new per-band Gate parameter keys (`lowGateEnabled`/`lowGateThreshold`/`lowGateRatio`/`lowGateAttack`/`lowGateRelease` and the Mid/High equivalents) at their neutral (off) v0.4.0 defaults - none of the eight presets engage gating, matching the "complete snapshot" convention the preset format already follows for prior additions (Knee, Range).
 
 | Preset | Category | Intent |
 |---|---|---|

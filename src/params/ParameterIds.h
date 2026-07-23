@@ -117,4 +117,28 @@ namespace ParamIDs
     inline constexpr auto highGateRatio = "highGateRatio";
     inline constexpr auto highGateAttack = "highGateAttack";
     inline constexpr auto highGateRelease = "highGateRelease";
+
+    // Per-band Mid/Side processing (v0.4.0 / GitHub issue #24): encodes a
+    // band's stereo signal to Mid/Side (src/dsp/MidSideCodec.h's
+    // equal-power, exactly-invertible transform) before that band's gain
+    // computation and decodes back after it. The band's main Threshold/
+    // Ratio (declared above) continue to drive the Mid component; Side
+    // gets its own independent Threshold/Ratio here (the issue's documented
+    // "at minimum" scope), sharing the band's Knee/Attack/Release/Range.
+    // `xMidSideEnabled` defaults to off (and is a defensive no-op on any
+    // non-stereo bus - see BandCompressor.h) so adding these nine IDs never
+    // changes existing default behaviour - a v0.3.0-shaped session/preset
+    // import resolves to M/S disabled on every band, the same tolerant
+    // migration mechanism as the v0.2.0 Knee and v0.3.0 Range additions.
+    inline constexpr auto lowMidSideEnabled = "lowMidSideEnabled";
+    inline constexpr auto lowSideThreshold = "lowSideThreshold";
+    inline constexpr auto lowSideRatio = "lowSideRatio";
+
+    inline constexpr auto midMidSideEnabled = "midMidSideEnabled";
+    inline constexpr auto midSideThreshold = "midSideThreshold";
+    inline constexpr auto midSideRatio = "midSideRatio";
+
+    inline constexpr auto highMidSideEnabled = "highMidSideEnabled";
+    inline constexpr auto highSideThreshold = "highSideThreshold";
+    inline constexpr auto highSideRatio = "highSideRatio";
 }

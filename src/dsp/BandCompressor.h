@@ -136,6 +136,33 @@ public:
     void setGateAttackMs (float newAttackMs);
     void setGateReleaseMs (float newReleaseMs);
 
+    // Per-band Mid/Side processing (v0.4.0, issue #24): encodes the band's
+    // stereo signal to Mid/Side (src/dsp/MidSideCodec.h's equal-power,
+    // exactly-invertible transform) immediately before the per-sample
+    // gain-computation loop and decodes back immediately after it, so
+    // makeup gain/the optional limiter always run on genuine L/R. The
+    // band's main Threshold/Ratio/Knee/Attack/Release/Range above continue
+    // to drive the Mid component (matching pre-v0.4.0 stereo-linked
+    // behaviour exactly when M/S is disabled); Side gets its own
+    // independent Threshold/Ratio (issue #24's documented "at minimum"
+    // scope), sharing the band's Knee/Attack/Release/Range - a deliberate
+    // scope decision to keep the per-band parameter surface bounded rather
+    // than doubling every control. Off by default and a defensive no-op on
+    // any bus that isn't exactly 2 channels (see process()'s definition),
+    // so existing sessions/presets and mono buses are entirely unaffected.
+    //
+    // Note: unlike Range/the limiter above, toggling M/S itself is a
+    // structural change of basis (L/R vs Mid/Side), not a smoothly
+    // rampable scalar gain - unless both Mid and Side happen to be
+    // completely bypassed (ratio == 1.0 on both) at the instant of the
+    // toggle, switching mid-playback can produce an audible discontinuity,
+    // the same caveat every M/S-capable console/plugin carries. Threshold/
+    // Ratio changes *within* a fixed M/S mode remain fully smoothed, as
+    // usual.
+    void setMidSideEnabled (bool shouldBeEnabled) noexcept;
+    void setSideThresholdDb (float newThresholdDb);
+    void setSideRatio (float newRatio);
+
 private:
     static constexpr double smoothingTimeSeconds = 0.05;
 
@@ -214,6 +241,20 @@ private:
     bool gateEnabled = false;
     float lastGateThresholdDb = -50.0f;
     float lastGateRatio = 2.0f;
+
+    // Per-band Mid/Side (v0.4.0): Side's own smoothed threshold/ratio - see
+    // setMidSideEnabled()'s doc comment above for why Knee/Attack/Release/
+    // Range stay shared with the main (Mid) path instead of doubling here
+    // too. No separate envelope follower is needed: envelopeFilter above
+    // already tracks independent per-channel state (it is called with a
+    // channel index - see process()), so the Side slot (channel index 1
+    // after encode) gets its own genuinely independent envelope trajectory
+    // "for free" from the same BallisticsFilter instance the Mid slot uses.
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> sideThresholdSmoothed;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> sideRatioSmoothed;
+    bool midSideEnabled = false;
+    float lastSideThresholdDb = -18.0f;
+    float lastSideRatio = 1.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BandCompressor)
 };

@@ -75,6 +75,16 @@ Each band's own compressor (Knee → Threshold/Ratio → Range → Attack/Releas
 
 The gate runs independently of, and in parallel with, that band's own compressor - both are keyed off the same input signal and their gains multiply together, so gating a band is never masked by (or fighting against) that band's own compression curve. Because toggling Gate On is a musical decision rather than a continuous control, expect it to behave like any gate: set Gate Threshold below the quietest material you want to keep, and Gate Ratio/Attack/Release to taste for how aggressively and quickly it should react.
 
+### Per-band Mid/Side *(new in v0.4.0)*
+
+| Parameter | Range | Low default | Mid default | High default | Unit | What it does |
+|---|---|---|---|---|---|---|
+| **M/S On** (M/S Enabled) | Off / On | Off | Off | Off | | Encodes that band's stereo signal to Mid/Side before its gain computation and decodes back to L/R afterward. Off by default, so the band stays stereo-linked exactly as the tables above describe. Only takes effect on a genuine stereo bus - a defensive no-op on mono. |
+| **Side Threshold** | -60 – 0 | -24 | -30 | -20 | dB | The Side (difference/width) component's own, independent Threshold - separate from the main Threshold above, which continues to drive the Mid (centre/sum) component. |
+| **Side Ratio** | 0.2:1 – 20:1 | 1:1 | 1:1 | 1:1 | : 1 | The Side component's own Ratio, sharing the band's Knee/Attack/Release/Range with Mid. Defaults to 1:1 (exact bypass) on every band, so simply enabling M/S with no further tweaking compresses only the centre content using the band's existing Threshold/Ratio while leaving the stereo width untouched - a sensible starting point for tightening a mix's centre (vocal, kick, bass) without narrowing its width. |
+
+Because L + R after decode depends only on Mid (algebraically independent of whatever happens to Side), processing the Side component - however aggressively - can never introduce a phase-cancellation artifact into a mono downmix; only changing the Mid component's own processing changes the mono sum, which is the intended, audible effect of compressing/expanding the centre.
+
 ### Per-band Mute / Solo (Low, Mid, High)
 
 | Parameter | Values | Default | What it does |

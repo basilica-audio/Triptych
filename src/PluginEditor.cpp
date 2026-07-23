@@ -18,17 +18,20 @@ namespace
     constexpr int presetBarHeight = 28;
     constexpr int numBandKnobRows = 6; // Threshold/Ratio/Knee/Attack/Release/Makeup (Knee added in v0.2.0)
     constexpr int numGateKnobRows = 4; // Gate Threshold/Ratio/Attack/Release (v0.4.0, issue #25)
+    constexpr int numMidSideKnobRows = 2; // Side Threshold/Side Ratio (v0.4.0, issue #24)
 
     constexpr int editorWidth = margin * 2 + numColumns * knobSize + (numColumns + 1) * margin;
 
     // Preset bar + top strip + band labels + Mute/Solo row + band knob rows
     // + each band's own Range enable-toggle row and Range-knob row (v0.3.0)
     // + each band's own Gate enable-toggle row and four Gate knob rows
-    // (v0.4.0, issue #25) + the High-band limiter option's own toggle row
-    // and threshold-knob row.
+    // (v0.4.0, issue #25) + each band's own M/S enable-toggle row and two
+    // Side knob rows (v0.4.0, issue #24) + the High-band limiter option's
+    // own toggle row and threshold-knob row.
     constexpr int editorHeight = margin + presetBarHeight + margin + rowHeight + margin + bandLabelHeight + toggleRowHeight
                                   + numBandKnobRows * rowHeight + toggleRowHeight + rowHeight
                                   + toggleRowHeight + numGateKnobRows * rowHeight
+                                  + toggleRowHeight + numMidSideKnobRows * rowHeight
                                   + margin + toggleRowHeight + rowHeight + margin;
 
     // M2 i18n frame (.scaffold/specs/preset-system-m2.md): selects German
@@ -79,6 +82,9 @@ TriptychAudioProcessorEditor::TriptychAudioProcessorEditor (TriptychAudioProcess
     configureKnob (lowControls.gateRatio, ParamIDs::lowGateRatio, "Gate Ratio");
     configureKnob (lowControls.gateAttack, ParamIDs::lowGateAttack, "Gate Attack");
     configureKnob (lowControls.gateRelease, ParamIDs::lowGateRelease, "Gate Release");
+    configureToggle (lowControls.midSideEnabled, ParamIDs::lowMidSideEnabled, "M/S On");
+    configureKnob (lowControls.sideThreshold, ParamIDs::lowSideThreshold, "Side Thresh");
+    configureKnob (lowControls.sideRatio, ParamIDs::lowSideRatio, "Side Ratio");
 
     configureToggle (midControls.mute, ParamIDs::midMute, "Mute");
     configureToggle (midControls.solo, ParamIDs::midSolo, "Solo");
@@ -95,6 +101,9 @@ TriptychAudioProcessorEditor::TriptychAudioProcessorEditor (TriptychAudioProcess
     configureKnob (midControls.gateRatio, ParamIDs::midGateRatio, "Gate Ratio");
     configureKnob (midControls.gateAttack, ParamIDs::midGateAttack, "Gate Attack");
     configureKnob (midControls.gateRelease, ParamIDs::midGateRelease, "Gate Release");
+    configureToggle (midControls.midSideEnabled, ParamIDs::midMidSideEnabled, "M/S On");
+    configureKnob (midControls.sideThreshold, ParamIDs::midSideThreshold, "Side Thresh");
+    configureKnob (midControls.sideRatio, ParamIDs::midSideRatio, "Side Ratio");
 
     configureToggle (highControls.mute, ParamIDs::highMute, "Mute");
     configureToggle (highControls.solo, ParamIDs::highSolo, "Solo");
@@ -111,6 +120,9 @@ TriptychAudioProcessorEditor::TriptychAudioProcessorEditor (TriptychAudioProcess
     configureKnob (highControls.gateRatio, ParamIDs::highGateRatio, "Gate Ratio");
     configureKnob (highControls.gateAttack, ParamIDs::highGateAttack, "Gate Attack");
     configureKnob (highControls.gateRelease, ParamIDs::highGateRelease, "Gate Release");
+    configureToggle (highControls.midSideEnabled, ParamIDs::highMidSideEnabled, "M/S On");
+    configureKnob (highControls.sideThreshold, ParamIDs::highSideThreshold, "Side Thresh");
+    configureKnob (highControls.sideRatio, ParamIDs::highSideRatio, "Side Ratio");
 
     configureToggle (highLimiterEnabledToggle, ParamIDs::highLimiterEnabled, "Limiter");
     configureKnob (highLimiterThresholdKnob, ParamIDs::highLimiterThreshold, "Lim. Thresh");
@@ -236,7 +248,21 @@ void TriptychAudioProcessorEditor::resized()
     for (auto* knob : { &highControls.gateThreshold, &highControls.gateRatio, &highControls.gateAttack, &highControls.gateRelease })
         knob->slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
 
-    // High-band limiter option (M1): High column only, below its Gate rows.
+    // Per-band Mid/Side processing (v0.4.0, issue #24): every band, directly
+    // below its Gate rows.
+    lowControls.midSideEnabled.button.setBounds (lowColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    lowControls.sideThreshold.slider.setBounds (lowColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+    lowControls.sideRatio.slider.setBounds (lowColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    midControls.midSideEnabled.button.setBounds (midColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    midControls.sideThreshold.slider.setBounds (midColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+    midControls.sideRatio.slider.setBounds (midColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    highControls.midSideEnabled.button.setBounds (highColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    highControls.sideThreshold.slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+    highControls.sideRatio.slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    // High-band limiter option (M1): High column only, below its M/S rows.
     highLimiterEnabledToggle.button.setBounds (highColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
     highLimiterThresholdKnob.slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
 }

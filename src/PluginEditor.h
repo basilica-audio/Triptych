@@ -59,6 +59,9 @@ private:
         Knob gateRatio;
         Knob gateAttack;
         Knob gateRelease;
+        Toggle midSideEnabled;
+        Knob sideThreshold;
+        Knob sideRatio;
     };
 
     void configureKnob (Knob& knob, const juce::String& parameterId, const juce::String& labelText);

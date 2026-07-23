@@ -79,6 +79,27 @@ namespace
         checkFloatDefault (apvts, rangeId, 12.0f);
     }
 
+    // Per-band Mid/Side processing (v0.4.0 / issue #24): off by default;
+    // Side Ratio defaults to 1:1 (bypass) so enabling M/S alone doesn't
+    // silently change a band's sound until Side Ratio is actually raised -
+    // see addMidSideParameters()'s doc comment in ParameterLayout.cpp.
+    void checkMidSideParameters (juce::AudioProcessorValueTreeState& apvts,
+                                  const char* midSideEnabledId,
+                                  const char* sideThresholdId,
+                                  const char* sideRatioId,
+                                  float sideThresholdDefaultDb)
+    {
+        auto* enabledParam = dynamic_cast<juce::AudioParameterBool*> (apvts.getParameter (midSideEnabledId));
+        REQUIRE (enabledParam != nullptr);
+        CHECK (enabledParam->get() == false);
+
+        checkFloatRange (apvts, sideThresholdId, -60.0f, 0.0f);
+        checkFloatDefault (apvts, sideThresholdId, sideThresholdDefaultDb);
+
+        checkFloatRange (apvts, sideRatioId, 0.2f, 20.0f);
+        checkFloatDefault (apvts, sideRatioId, 1.0f);
+    }
+
     // v0.2.0 (docs/design-brief.md): Threshold/Ratio/Attack/Release defaults
     // now differ per band - Knee and Makeup stay identical across bands (see
     // ParameterLayout.cpp).
@@ -126,6 +147,9 @@ TEST_CASE ("Processor instantiates with the expected parameters", "[processor][p
             ParamIDs::midThreshold, ParamIDs::midRatio, ParamIDs::midKnee, ParamIDs::midAttack, ParamIDs::midRelease, ParamIDs::midMakeup,
             ParamIDs::highThreshold, ParamIDs::highRatio, ParamIDs::highKnee, ParamIDs::highAttack, ParamIDs::highRelease, ParamIDs::highMakeup,
             ParamIDs::lowRangeEnabled, ParamIDs::lowRange, ParamIDs::midRangeEnabled, ParamIDs::midRange, ParamIDs::highRangeEnabled, ParamIDs::highRange,
+            ParamIDs::lowMidSideEnabled, ParamIDs::lowSideThreshold, ParamIDs::lowSideRatio,
+            ParamIDs::midMidSideEnabled, ParamIDs::midSideThreshold, ParamIDs::midSideRatio,
+            ParamIDs::highMidSideEnabled, ParamIDs::highSideThreshold, ParamIDs::highSideRatio,
             ParamIDs::lowMute, ParamIDs::lowSolo, ParamIDs::midMute, ParamIDs::midSolo, ParamIDs::highMute, ParamIDs::highSolo,
             ParamIDs::highLimiterEnabled, ParamIDs::highLimiterThreshold,
             ParamIDs::output,
@@ -135,13 +159,14 @@ TEST_CASE ("Processor instantiates with the expected parameters", "[processor][p
             CHECK (apvts.getParameter (id) != nullptr);
     }
 
-    SECTION ("total parameter count matches the v0.3.0 layout")
+    SECTION ("total parameter count matches the v0.4.0 layout")
     {
         // 2 splits + 3 bands * 6 (Threshold/Ratio/Knee/Attack/Release/Makeup
         // - Knee added in v0.2.0) + 3 bands * 2 (Range Enabled/Range - added
-        // in v0.3.0) + 3 bands * 2 (Mute/Solo) + 2 (High limiter
-        // enable/threshold) + 1 output = 35.
-        CHECK (apvts.processor.getParameters().size() == 35);
+        // in v0.3.0) + 3 bands * 3 (M/S Enabled/Side Threshold/Side Ratio -
+        // added in v0.4.0, issue #24) + 3 bands * 2 (Mute/Solo) + 2 (High
+        // limiter enable/threshold) + 1 output = 44.
+        CHECK (apvts.processor.getParameters().size() == 44);
     }
 
     SECTION ("Range: off by default on every band, 0-30 dB range, 12 dB reasoned starting value (v0.3.0)")
@@ -149,6 +174,13 @@ TEST_CASE ("Processor instantiates with the expected parameters", "[processor][p
         checkRangeParameters (apvts, ParamIDs::lowRangeEnabled, ParamIDs::lowRange);
         checkRangeParameters (apvts, ParamIDs::midRangeEnabled, ParamIDs::midRange);
         checkRangeParameters (apvts, ParamIDs::highRangeEnabled, ParamIDs::highRange);
+    }
+
+    SECTION ("Mid/Side: off by default on every band, Side Ratio bypassed at 1:1 (v0.4.0, issue #24)")
+    {
+        checkMidSideParameters (apvts, ParamIDs::lowMidSideEnabled, ParamIDs::lowSideThreshold, ParamIDs::lowSideRatio, -24.0f);
+        checkMidSideParameters (apvts, ParamIDs::midMidSideEnabled, ParamIDs::midSideThreshold, ParamIDs::midSideRatio, -30.0f);
+        checkMidSideParameters (apvts, ParamIDs::highMidSideEnabled, ParamIDs::highSideThreshold, ParamIDs::highSideRatio, -20.0f);
     }
 
     SECTION ("Mute/Solo default off for every band")

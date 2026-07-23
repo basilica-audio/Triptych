@@ -153,6 +153,46 @@ namespace
             12.0f,
             juce::AudioParameterFloatAttributes().withLabel ("dB")));
     }
+
+    // Per-band Mid/Side processing (v0.4.0 / GitHub issue #24): off by
+    // default so adding these parameters never changes existing default
+    // behaviour. Side Threshold/Ratio share the same ranges as the band's
+    // own main Threshold/Ratio (see addBandParameters() above) for
+    // consistency, with Side Ratio defaulting to 1:1 (bit-exact bypass) -
+    // so simply enabling M/S with no further tweaking compresses only the
+    // Mid (centre) component using the band's existing Threshold/Ratio,
+    // leaving Side untouched, a musically sensible starting point (tighten
+    // the centre without touching stereo width) rather than an arbitrary
+    // doubled default. Side Threshold defaults to the same value as the
+    // band's own main Threshold default, so a user who *does* raise Side
+    // Ratio above 1:1 starts from a coherent operating point.
+    void addMidSideParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout,
+                                const char* midSideEnabledId,
+                                const char* sideThresholdId,
+                                const char* sideRatioId,
+                                const juce::String& labelPrefix,
+                                float sideThresholdDefaultDb)
+    {
+        layout.add (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { midSideEnabledId, 1 }, labelPrefix + " M/S Enabled", false));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { sideThresholdId, 1 },
+            labelPrefix + " Side Threshold",
+            juce::NormalisableRange<float> (-60.0f, 0.0f, 0.01f),
+            sideThresholdDefaultDb,
+            juce::AudioParameterFloatAttributes().withLabel ("dB")));
+
+        auto sideRatioRange = juce::NormalisableRange<float> (ratioMin, ratioMax, 0.01f);
+        sideRatioRange.setSkewForCentre (1.0f);
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { sideRatioId, 1 },
+            labelPrefix + " Side Ratio",
+            sideRatioRange,
+            1.0f,
+            juce::AudioParameterFloatAttributes().withLabel (":1")));
+    }
 }
 
 namespace trpt
@@ -216,6 +256,13 @@ namespace trpt
         addRangeParameters (layout, ParamIDs::lowRangeEnabled, ParamIDs::lowRange, "Low");
         addRangeParameters (layout, ParamIDs::midRangeEnabled, ParamIDs::midRange, "Mid");
         addRangeParameters (layout, ParamIDs::highRangeEnabled, ParamIDs::highRange, "High");
+
+        //======================================================================
+        // Per-band Mid/Side processing (v0.4.0 / issue #24). See
+        // addMidSideParameters()'s doc comment above.
+        addMidSideParameters (layout, ParamIDs::lowMidSideEnabled, ParamIDs::lowSideThreshold, ParamIDs::lowSideRatio, "Low", -24.0f);
+        addMidSideParameters (layout, ParamIDs::midMidSideEnabled, ParamIDs::midSideThreshold, ParamIDs::midSideRatio, "Mid", -30.0f);
+        addMidSideParameters (layout, ParamIDs::highMidSideEnabled, ParamIDs::highSideThreshold, ParamIDs::highSideRatio, "High", -20.0f);
 
         //======================================================================
         // Per-band Mute/Solo (M1). See ParameterIds.h for the console-style

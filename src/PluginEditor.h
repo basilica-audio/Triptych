@@ -54,6 +54,9 @@ private:
         Knob makeup;
         Toggle rangeEnabled;
         Knob range;
+        Toggle midSideEnabled;
+        Knob sideThreshold;
+        Knob sideRatio;
     };
 
     void configureKnob (Knob& knob, const juce::String& parameterId, const juce::String& labelText);

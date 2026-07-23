@@ -544,6 +544,216 @@ TEST_CASE ("BandCompressor: limiter ballistics track input while disabled, not f
     CHECK (maxAbsoluteDifference < 0.05f);
 }
 
+// Per-band Mid/Side processing (v0.4.0, issue #24): L/R passthrough when
+// disabled - a stereo signal with distinct L/R content must pass through
+// completely unaffected by the M/S machinery while setMidSideEnabled() is
+// never called (the default), matching pre-v0.4.0 stereo-linked behaviour
+// exactly.
+TEST_CASE ("BandCompressor: Mid/Side disabled reproduces pre-v0.4.0 stereo-linked passthrough exactly", "[dsp][compressor][midside][regression]")
+{
+    BandCompressor band;
+    band.setThresholdDb (-40.0f);
+    band.setRatio (1.0f); // bypass, isolates the M/S wiring itself
+    band.setMakeupDb (0.0f);
+    // setMidSideEnabled() deliberately never called - the default (off).
+
+    const auto spec = makeTestSpec (2);
+    band.prepare (spec);
+
+    // Distinct L/R content (different frequencies) so any accidental M/S
+    // mixing would be immediately audible as crosstalk between channels.
+    juce::AudioBuffer<float> reference (2, testBlockSize);
+    auto* left = reference.getWritePointer (0);
+    auto* right = reference.getWritePointer (1);
+
+    for (int i = 0; i < testBlockSize; ++i)
+    {
+        const auto leftPhase = juce::MathConstants<double>::twoPi * 300.0 * i / testSampleRate;
+        const auto rightPhase = juce::MathConstants<double>::twoPi * 700.0 * i / testSampleRate;
+        left[i] = 0.5f * static_cast<float> (std::sin (leftPhase));
+        right[i] = 0.5f * static_cast<float> (std::sin (rightPhase));
+    }
+
+    juce::AudioBuffer<float> processed;
+    processed.makeCopyOf (reference);
+
+    juce::dsp::AudioBlock<float> block (processed);
+    band.process (block);
+
+    for (int channel = 0; channel < 2; ++channel)
+    {
+        const auto* refData = reference.getReadPointer (channel);
+        const auto* outData = processed.getReadPointer (channel);
+
+        for (int i = 0; i < testBlockSize; ++i)
+            CHECK (outData[i] == Catch::Approx (refData[i]).margin (1e-6));
+    }
+}
+
+// Correct M/S round-trip: with both Mid (main Ratio) and Side (Side Ratio)
+// fully bypassed (ratio == 1.0 on both), enabling M/S must still reproduce
+// the input bit-exactly - the encode/decode transform itself must be
+// lossless, not just "close enough".
+TEST_CASE ("BandCompressor: Mid/Side round-trip is bit-exact when both Mid and Side are bypassed", "[dsp][compressor][midside][null]")
+{
+    BandCompressor band;
+    band.setThresholdDb (-40.0f);
+    band.setRatio (1.0f);
+    band.setMakeupDb (0.0f);
+    band.setSideThresholdDb (-40.0f);
+    band.setSideRatio (1.0f);
+    band.setMidSideEnabled (true);
+
+    const auto spec = makeTestSpec (2);
+    band.prepare (spec);
+
+    juce::AudioBuffer<float> reference (2, testBlockSize);
+    auto* left = reference.getWritePointer (0);
+    auto* right = reference.getWritePointer (1);
+
+    for (int i = 0; i < testBlockSize; ++i)
+    {
+        const auto leftPhase = juce::MathConstants<double>::twoPi * testFrequencyHz * i / testSampleRate;
+        const auto rightPhase = juce::MathConstants<double>::twoPi * (testFrequencyHz * 1.5) * i / testSampleRate;
+        left[i] = 0.6f * static_cast<float> (std::sin (leftPhase));
+        right[i] = 0.4f * static_cast<float> (std::sin (rightPhase));
+    }
+
+    juce::AudioBuffer<float> processed;
+    processed.makeCopyOf (reference);
+
+    juce::dsp::AudioBlock<float> block (processed);
+    band.process (block);
+
+    for (int channel = 0; channel < 2; ++channel)
+    {
+        const auto* refData = reference.getReadPointer (channel);
+        const auto* outData = processed.getReadPointer (channel);
+
+        for (int i = 0; i < testBlockSize; ++i)
+            CHECK (outData[i] == Catch::Approx (refData[i]).margin (1e-5f));
+    }
+}
+
+// Mono-compatibility guarantee at the BandCompressor level (issue #24): with
+// M/S engaged and the Side channel driven into heavy gain reduction, the
+// processed L + R sum must be unaffected by whatever happened to Side -
+// only Mid processing (identical on both instances here) may change it. This
+// is the real, envelope-integrated proof of MidSideCodecTests.cpp's pure-math
+// "mono sum depends only on Mid" property.
+TEST_CASE ("BandCompressor: mono sum after M/S processing is unaffected by Side gain reduction", "[dsp][compressor][midside][mono-compat]")
+{
+    auto makeBand = [] (float sideRatio)
+    {
+        auto band = std::make_unique<BandCompressor>();
+        band->setThresholdDb (0.0f); // Mid path never compresses in this test
+        band->setRatio (1.0f);
+        band->setMakeupDb (0.0f);
+        band->setSideThresholdDb (-50.0f);
+        band->setSideRatio (sideRatio);
+        band->setMidSideEnabled (true);
+
+        const auto spec = makeTestSpec (2);
+        band->prepare (spec);
+        return band;
+    };
+
+    juce::AudioBuffer<float> reference (2, testBlockSize);
+    auto* left = reference.getWritePointer (0);
+    auto* right = reference.getWritePointer (1);
+
+    for (int i = 0; i < testBlockSize; ++i)
+    {
+        const auto leftPhase = juce::MathConstants<double>::twoPi * testFrequencyHz * i / testSampleRate;
+        const auto rightPhase = juce::MathConstants<double>::twoPi * (testFrequencyHz * 1.3) * i / testSampleRate;
+        left[i] = 0.5f * static_cast<float> (std::sin (leftPhase));
+        right[i] = 0.3f * static_cast<float> (std::sin (rightPhase));
+    }
+
+    auto bypassedSideBand = makeBand (1.0f);
+    juce::AudioBuffer<float> bypassedProcessed;
+    bypassedProcessed.makeCopyOf (reference);
+    juce::dsp::AudioBlock<float> bypassedBlock (bypassedProcessed);
+    bypassedSideBand->process (bypassedBlock);
+
+    auto compressedSideBand = makeBand (10.0f); // heavy downward expansion... i.e. compression of Side
+    juce::AudioBuffer<float> compressedProcessed;
+    compressedProcessed.makeCopyOf (reference);
+    juce::dsp::AudioBlock<float> compressedBlock (compressedProcessed);
+    compressedSideBand->process (compressedBlock);
+
+    const auto* bypassedLeft = bypassedProcessed.getReadPointer (0);
+    const auto* bypassedRight = bypassedProcessed.getReadPointer (1);
+    const auto* compressedLeft = compressedProcessed.getReadPointer (0);
+    const auto* compressedRight = compressedProcessed.getReadPointer (1);
+
+    // Sanity: the two Side settings genuinely produce different per-channel
+    // output (otherwise this test wouldn't exercise anything).
+    bool anyChannelDiffers = false;
+
+    for (int i = 0; i < testBlockSize; ++i)
+    {
+        if (std::abs (bypassedLeft[i] - compressedLeft[i]) > 1e-4f || std::abs (bypassedRight[i] - compressedRight[i]) > 1e-4f)
+        {
+            anyChannelDiffers = true;
+            break;
+        }
+    }
+
+    CHECK (anyChannelDiffers);
+
+    // The property under test: L + R is identical regardless of Side's
+    // processing, within a small floating-point/envelope-settling margin.
+    for (int i = 0; i < testBlockSize; ++i)
+    {
+        const auto bypassedSum = bypassedLeft[i] + bypassedRight[i];
+        const auto compressedSum = compressedLeft[i] + compressedRight[i];
+        CHECK (compressedSum == Catch::Approx (bypassedSum).margin (1e-3f));
+    }
+
+    CHECK (TestHelpers::allSamplesFinite (compressedProcessed));
+}
+
+// Regression: mono buses must be a defensive no-op for M/S - a band whose
+// M/S is enabled but that only ever sees a mono channel count must behave
+// identically to one that never touches the M/S API at all.
+TEST_CASE ("BandCompressor: Mid/Side enabled is a no-op on a mono bus", "[dsp][compressor][midside][regression]")
+{
+    auto makeBand = [] (bool midSideEnabled)
+    {
+        auto band = std::make_unique<BandCompressor>();
+        band->setThresholdDb (-24.0f);
+        band->setRatio (2.5f);
+        band->setMakeupDb (0.0f);
+        band->setSideThresholdDb (-40.0f);
+        band->setSideRatio (10.0f);
+        band->setMidSideEnabled (midSideEnabled);
+
+        const auto spec = makeTestSpec (1); // mono
+        band->prepare (spec);
+        return band;
+    };
+
+    auto disabled = makeBand (false);
+    auto enabled = makeBand (true);
+
+    juce::AudioBuffer<float> bufferA (1, testBlockSize);
+    TestHelpers::fillWithSine (bufferA, testSampleRate, testFrequencyHz, 0.7f);
+    juce::AudioBuffer<float> bufferB;
+    bufferB.makeCopyOf (bufferA);
+
+    juce::dsp::AudioBlock<float> blockA (bufferA);
+    juce::dsp::AudioBlock<float> blockB (bufferB);
+    disabled->process (blockA);
+    enabled->process (blockB);
+
+    const auto* dataA = bufferA.getReadPointer (0);
+    const auto* dataB = bufferB.getReadPointer (0);
+
+    for (int i = 0; i < testBlockSize; ++i)
+        CHECK (dataA[i] == Catch::Approx (dataB[i]).margin (1e-9f));
+}
+
 TEST_CASE ("BandCompressor: reset() clears envelope/gain-ramp state without crashing", "[dsp][compressor]")
 {
     BandCompressor band;

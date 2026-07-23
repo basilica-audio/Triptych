@@ -71,6 +71,11 @@ public:
     void setLowRangeEnabled (bool shouldBeEnabled) noexcept { lowBand.setRangeEnabled (shouldBeEnabled); }
     void setLowRangeDb (float newRangeDb) { lowBand.setRangeDb (newRangeDb); }
 
+    // Per-band Mid/Side processing (v0.4.0, issue #24). See BandCompressor.h.
+    void setLowMidSideEnabled (bool shouldBeEnabled) noexcept { lowBand.setMidSideEnabled (shouldBeEnabled); }
+    void setLowSideThresholdDb (float newThresholdDb) { lowBand.setSideThresholdDb (newThresholdDb); }
+    void setLowSideRatio (float newRatio) { lowBand.setSideRatio (newRatio); }
+
     void setMidThresholdDb (float newThresholdDb) { midBand.setThresholdDb (newThresholdDb); }
     void setMidRatio (float newRatio) { midBand.setRatio (newRatio); }
     void setMidKneePercent (float newKneePercent) { midBand.setKneePercent (newKneePercent); }
@@ -80,6 +85,10 @@ public:
     void setMidRangeEnabled (bool shouldBeEnabled) noexcept { midBand.setRangeEnabled (shouldBeEnabled); }
     void setMidRangeDb (float newRangeDb) { midBand.setRangeDb (newRangeDb); }
 
+    void setMidMidSideEnabled (bool shouldBeEnabled) noexcept { midBand.setMidSideEnabled (shouldBeEnabled); }
+    void setMidSideThresholdDb (float newThresholdDb) { midBand.setSideThresholdDb (newThresholdDb); }
+    void setMidSideRatio (float newRatio) { midBand.setSideRatio (newRatio); }
+
     void setHighThresholdDb (float newThresholdDb) { highBand.setThresholdDb (newThresholdDb); }
     void setHighRatio (float newRatio) { highBand.setRatio (newRatio); }
     void setHighKneePercent (float newKneePercent) { highBand.setKneePercent (newKneePercent); }
@@ -88,6 +97,10 @@ public:
     void setHighMakeupDb (float newMakeupDb) { highBand.setMakeupDb (newMakeupDb); }
     void setHighRangeEnabled (bool shouldBeEnabled) noexcept { highBand.setRangeEnabled (shouldBeEnabled); }
     void setHighRangeDb (float newRangeDb) { highBand.setRangeDb (newRangeDb); }
+
+    void setHighMidSideEnabled (bool shouldBeEnabled) noexcept { highBand.setMidSideEnabled (shouldBeEnabled); }
+    void setHighSideThresholdDb (float newThresholdDb) { highBand.setSideThresholdDb (newThresholdDb); }
+    void setHighSideRatio (float newRatio) { highBand.setSideRatio (newRatio); }
 
     // High-band limiter option (M1). See BandCompressor::setLimiterEnabled
     // for why toggling this is real-time safe with no added latency.

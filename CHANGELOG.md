@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-band Mid/Side processing** (GitHub issue #24): a per-band `M/S Enabled` toggle (`lowMidSideEnabled` et al., default off) encodes that band's stereo signal to Mid/Side (equal-power, exactly-invertible transform - `src/dsp/MidSideCodec.h`) before its gain computation and decodes back after it. The band's existing Threshold/Ratio continue to drive the Mid (centre) component; Side gets its own independent Threshold/Ratio (`lowSideThreshold`/`lowSideRatio` et al., defaulting to the band's own Threshold default / 1:1 bypass respectively), sharing Knee/Attack/Release/Range with Mid. A defensive no-op on any bus that isn't exactly 2 channels. Because `L + R` after decode depends algebraically only on Mid, processing Side - however aggressively - can never introduce a phase-cancellation artifact into a mono downmix. See `docs/architecture.md`'s "Per-band Mid/Side processing (v0.4.0)" section.
+- Editor: an `M/S On` toggle plus Side Threshold/Ratio knobs added to every band's control column.
+- All eight factory presets gain the nine new M/S parameter keys at their neutral (off, Side Ratio 1:1) defaults - none of the eight presets engage M/S.
+- Test suite broadened: pure encode/decode transform coverage (`tests/MidSideCodecTests.cpp`, including a dedicated mono-compatibility proof), real-audio L/R-passthrough-when-disabled/bit-exact-round-trip/mono-sum-independent-of-Side coverage (`tests/BandCompressorTests.cpp`), a mono-bus-is-a-no-op regression test, a v0.3.0-to-v0.4.0 state migration-tolerance test, and updated parameter-count/round-trip coverage.
+
 ## [0.3.0] - 2026-07-17
 
 ### Added

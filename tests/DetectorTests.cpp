@@ -429,19 +429,21 @@ TEST_CASE ("VCA character helpers reproduce the emergent-knee table and the loop
         CHECK (trpt::vcaKneeWidthDb (0.25f) == Catch::Approx (trpt::vcaKneeWidthDb (4.0f)).margin (1.0e-4));
     }
 
-    SECTION ("effective attack scale k / (1 + k), k = ratio - 1")
+    SECTION ("effective attack scale 1 / (1 + k), k = ratio - 1")
     {
         CHECK (trpt::vcaAttackScale (2.0f) == Catch::Approx (1.0f / 2.0f).margin (1.0e-5));
-        CHECK (trpt::vcaAttackScale (4.0f) == Catch::Approx (3.0f / 4.0f).margin (1.0e-5));
-        CHECK (trpt::vcaAttackScale (10.0f) == Catch::Approx (9.0f / 10.0f).margin (1.0e-5));
+        CHECK (trpt::vcaAttackScale (4.0f) == Catch::Approx (1.0f / 4.0f).margin (1.0e-5));
+        CHECK (trpt::vcaAttackScale (10.0f) == Catch::Approx (1.0f / 10.0f).margin (1.0e-5));
 
         // Higher ratio => faster effective attack is the loop signature, so
-        // the scale must increase monotonically with ratio.
-        CHECK (trpt::vcaAttackScale (2.0f) < trpt::vcaAttackScale (4.0f));
-        CHECK (trpt::vcaAttackScale (4.0f) < trpt::vcaAttackScale (10.0f));
+        // the time-constant scale must SHRINK monotonically as ratio rises.
+        CHECK (trpt::vcaAttackScale (2.0f) > trpt::vcaAttackScale (4.0f));
+        CHECK (trpt::vcaAttackScale (4.0f) > trpt::vcaAttackScale (10.0f));
 
-        // k is floored at 0.01 so ratio == 1 can never divide by zero.
+        // At 1:1 the loop is doing nothing, so the time constant must be left
+        // essentially untouched - and k is floored at 0.01 so nothing divides
+        // by zero there.
         CHECK (std::isfinite (trpt::vcaAttackScale (1.0f)));
-        CHECK (trpt::vcaAttackScale (1.0f) > 0.0f);
+        CHECK (trpt::vcaAttackScale (1.0f) == Catch::Approx (1.0f).margin (0.02f));
     }
 }

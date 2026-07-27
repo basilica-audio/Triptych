@@ -203,9 +203,24 @@ namespace trpt
     // docs/manual.md.
     float vcaKneePercent (float ratio, float thresholdDb) noexcept;
 
-    // VCA character's effective-attack scale factor: tau_att_eff =
-    // tau_att * k / (1 + k) with k = ratio - 1 (k = 1/ratio - 1 below 1:1),
-    // clamped k >= 0.01. Higher ratio means faster effective attack - the
-    // loop-speedup signature of a feedback topology, reproduced statically.
+    // VCA character's effective-attack scale factor:
+    //
+    //   tau_att_eff = tau_att / (1 + k),   k = ratio - 1  (k = 1/ratio - 1
+    //                                                      below 1:1),
+    //   k clamped to >= 0.01.
+    //
+    // Higher ratio means faster effective attack - the loop-speedup signature
+    // of a feedback topology, reproduced statically. The source derivation is
+    // that a feedback compressor's loop integrates the *residual* overshoot,
+    // which divides the loop time constant by (1 + k).
+    //
+    // DEVIATION FROM THE BRIEF (documented in the PR): brief section 3.2 item
+    // 2 writes this factor as `k / (1 + k)`, which contradicts both its own
+    // stated rationale ("higher ratio => faster effective attack") and test
+    // T17's binding ordering (10:1 faster than 4:1 faster than 2:1) - the
+    // `k / (1 + k)` form makes higher ratios *slower*, and degenerates to an
+    // instantaneous attack at 1:1, where a feedback loop that is doing nothing
+    // must leave the time constant untouched. `1 / (1 + k)` reproduces the
+    // documented intent, the research derivation, and T17.
     float vcaAttackScale (float ratio) noexcept;
 }

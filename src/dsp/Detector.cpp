@@ -47,7 +47,7 @@ namespace trpt
 
         k = juce::jmax (0.01f, k);
 
-        return k / (1.0f + k);
+        return 1.0f / (1.0f + k);
     }
 }
 
@@ -111,7 +111,7 @@ void Detector::updateForBlock (int numSamples) noexcept
                    && blockLink == 0.0f
                    && blockCharacterBlend == 0.0f;
 
-    // VCA character scales the effective attack toward tau * k / (1 + k); the
+    // VCA character scales the effective attack toward tau / (1 + k); the
     // 10 ms crossfade rides the scale itself, so a Clean <-> VCA switch ramps
     // the coefficient rather than stepping it. In Clean the blend is exactly
     // 0, so this multiplies by exactly 1.0f and the commanded attack reaches

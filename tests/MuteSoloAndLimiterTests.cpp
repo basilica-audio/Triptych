@@ -1,3 +1,6 @@
+#include "LegacyReferenceChain.h"
+
+#include <cmath>
 #include "PluginProcessor.h"
 #include "dsp/TriptychEngine.h"
 #include "params/ParameterIds.h"
@@ -393,4 +396,89 @@ TEST_CASE ("Rapid Mute/Solo/Limiter automation across many blocks produces no Na
         CHECK_NOTHROW (processor.processBlock (buffer, midi));
         CHECK (TestHelpers::allSamplesFinite (buffer));
     }
+}
+
+//==============================================================================
+// T8b (v0.5.0, brief section 6): with lookahead Off, the optional brickwall is
+// still the legacy juce::dsp::Limiter path, sample for sample. v0.5.0 only
+// swaps in the overshoot-proof lookahead brickwall when lookahead is actually
+// engaged - every existing session, which has lookahead Off, keeps exactly the
+// limiter it shipped with.
+TEST_CASE ("T8b: with lookahead Off the band limiter is sample-exactly the v0.4.0 limiter", "[limiter][regression][neutrality]")
+{
+    constexpr auto sampleRate = 48000.0;
+    constexpr int blockSize = 256;
+    constexpr auto limiterThresholdDb = -6.0f;
+
+    juce::dsp::ProcessSpec spec;
+    spec.sampleRate = sampleRate;
+    spec.maximumBlockSize = blockSize;
+    spec.numChannels = 2;
+
+    BandCompressor shipped;
+    LegacyReference::Band legacy;
+
+    const auto configure = [] (auto& band)
+    {
+        band.setThresholdDb (-18.0f);
+        band.setRatio (2.0f);
+        band.setKneePercent (50.0f);
+        band.setAttackMs (8.0f);
+        band.setReleaseMs (90.0f);
+        band.setMakeupDb (4.0f);
+        band.setLimiterEnabled (true);
+        band.setLimiterThresholdDb (limiterThresholdDb);
+    };
+
+    configure (shipped);
+    configure (legacy);
+
+    // Explicitly the neutral lookahead setting - the code path under test.
+    shipped.setLookaheadSamples (0);
+
+    shipped.prepare (spec);
+    legacy.prepare (spec);
+
+    juce::AudioBuffer<float> shippedBuffer (2, blockSize);
+    juce::AudioBuffer<float> legacyBuffer (2, blockSize);
+    juce::Random random (0x11B7);
+
+    auto mismatches = 0;
+    auto exceededThreshold = false;
+
+    for (int blockIndex = 0; blockIndex < 60; ++blockIndex)
+    {
+        // Loud enough that the limiter is genuinely working - a comparison of
+        // two unlimited renders would prove nothing.
+        for (int channel = 0; channel < 2; ++channel)
+            for (int i = 0; i < blockSize; ++i)
+            {
+                const auto value = 1.5f * (random.nextFloat() * 2.0f - 1.0f);
+                shippedBuffer.setSample (channel, i, value);
+                legacyBuffer.setSample (channel, i, value);
+            }
+
+        auto shippedBlock = juce::dsp::AudioBlock<float> (shippedBuffer);
+        shipped.process (shippedBlock);
+
+        auto legacyBlock = juce::dsp::AudioBlock<float> (legacyBuffer);
+        legacy.process (legacyBlock);
+
+        for (int channel = 0; channel < 2; ++channel)
+            for (int i = 0; i < blockSize; ++i)
+            {
+                if (shippedBuffer.getSample (channel, i) != legacyBuffer.getSample (channel, i))
+                    ++mismatches;
+
+                if (std::abs (shippedBuffer.getSample (channel, i)) > juce::Decibels::decibelsToGain (limiterThresholdDb))
+                    exceededThreshold = true;
+            }
+    }
+
+    CHECK (mismatches == 0);
+
+    // Sanity: the legacy juce::dsp::Limiter has no lookahead, so it genuinely
+    // does overshoot on transients - which is precisely why v0.5.0 offers the
+    // lookahead brickwall as an alternative rather than as a replacement.
+    CHECK (exceededThreshold);
 }

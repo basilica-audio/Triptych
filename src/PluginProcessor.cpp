@@ -50,6 +50,7 @@ namespace
             { BinaryData::masteringSafetyCeiling_json, BinaryData::masteringSafetyCeiling_jsonSize },
             { BinaryData::parallelStyleDensity_json, BinaryData::parallelStyleDensity_jsonSize },
             { BinaryData::hardLimiterCeiling_json, BinaryData::hardLimiterCeiling_jsonSize },
+            { BinaryData::glueMaster_json, BinaryData::glueMaster_jsonSize },
         };
     }
 }

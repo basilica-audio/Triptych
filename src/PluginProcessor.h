@@ -9,7 +9,8 @@
 // Triptych: a 3-band multiband compressor for dense metal mixes. Signal flow
 // lives in TriptychEngine (src/dsp) so it stays unit-testable independent of
 // this AudioProcessor; this class is just APVTS + host plumbing around it.
-class TriptychAudioProcessor final : public juce::AudioProcessor
+class TriptychAudioProcessor final : public juce::AudioProcessor,
+                                      public juce::AsyncUpdater
 {
 public:
     TriptychAudioProcessor();
@@ -48,6 +49,25 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+
+    // Per-band gain-reduction telemetry for the editor's GR bars (v0.5.0).
+    const trpt::GainReductionMeter& getGainReductionMeter() const noexcept { return engine.getGainReductionMeter(); }
+
+    // The lookahead lengths, in seconds, behind the Lookahead choice
+    // parameter's four options. Public so tests can derive the expected
+    // reported latency without duplicating the table.
+    static constexpr float lookaheadSecondsForChoice (int choiceIndex) noexcept
+    {
+        return choiceIndex == 1 ? 0.0015f
+                                : choiceIndex == 2 ? 0.003f
+                                                    : choiceIndex == 3 ? 0.005f
+                                                                        : 0.0f;
+    }
+
+    // State schema version stamped onto the APVTS root by getStateInformation
+    // and read back by setStateInformation (absent means v0.4.0 or older).
+    static constexpr int stateSchemaVersion = 5;
+    static constexpr const char* stateVersionProperty = "stateVersion";
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -139,6 +159,56 @@ private:
     std::atomic<float>* highLimiterThresholdDb = nullptr;
 
     std::atomic<float>* outputDb = nullptr;
+
+    //==========================================================================
+    // v0.5.0 parameters.
+    std::atomic<float>* scSourceChoice = nullptr;
+    std::atomic<float>* scListenChoice = nullptr;
+    std::atomic<float>* crossoverSlopeChoice = nullptr;
+    std::atomic<float>* lookaheadChoice = nullptr;
+    std::atomic<float>* mixPercent = nullptr;
+
+    std::atomic<float>* lowDetectorModeChoice = nullptr;
+    std::atomic<float>* lowAutoReleaseOn = nullptr;
+    std::atomic<float>* lowCharacterChoice = nullptr;
+    std::atomic<float>* lowStereoLinkPercent = nullptr;
+    std::atomic<float>* lowGateHoldMs = nullptr;
+    std::atomic<float>* lowGateHysteresisDb = nullptr;
+
+    std::atomic<float>* midDetectorModeChoice = nullptr;
+    std::atomic<float>* midAutoReleaseOn = nullptr;
+    std::atomic<float>* midCharacterChoice = nullptr;
+    std::atomic<float>* midStereoLinkPercent = nullptr;
+    std::atomic<float>* midGateHoldMs = nullptr;
+    std::atomic<float>* midGateHysteresisDb = nullptr;
+
+    std::atomic<float>* highDetectorModeChoice = nullptr;
+    std::atomic<float>* highAutoReleaseOn = nullptr;
+    std::atomic<float>* highCharacterChoice = nullptr;
+    std::atomic<float>* highStereoLinkPercent = nullptr;
+    std::atomic<float>* highGateHoldMs = nullptr;
+    std::atomic<float>* highGateHysteresisDb = nullptr;
+
+    // Lookahead is the one parameter that changes the plugin's reported
+    // latency, so it is NOT applied straight from the audio thread. The audio
+    // thread publishes what it wants, an AsyncUpdater tells the host on the
+    // message thread, and only once the host has been told does the audio
+    // thread actually reconfigure the engine - so the engine always processes
+    // at exactly the latency the host currently believes in.
+    // The rate prepareToPlay() was last called with. Deliberately NOT
+    // AudioProcessor::getSampleRate(), which is only populated by the host
+    // wrapper's setRateAndBufferSizeDetails() call and therefore reads 0 for
+    // a processor driven directly (as every unit test does).
+    double preparedSampleRate = 44100.0;
+
+    std::atomic<int> requestedLookaheadSamples { 0 };
+    std::atomic<int> reportedLookaheadSamples { 0 };
+    int appliedLookaheadSamples = 0;
+
+    void handleAsyncUpdate() override;
+
+    // Resolves the Lookahead choice to a sample count at the current rate.
+    int resolveLookaheadSamples() const noexcept;
 
     // Reads every APVTS atomic and pushes the current values into `engine`.
     // Called both from prepareToPlay() (so the first block after prepare

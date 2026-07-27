@@ -34,6 +34,8 @@ Each band's own compressor (Knee → Threshold/Ratio → Range → Attack/Releas
 
 **A note on the voicing.** The per-band defaults below (and the factory presets in [`docs/presets.md`](presets.md)) are **research-derived**, sourced from published manufacturer manuals and mastering-engineer technique articles for the multiband-compression reference class - not measured against reference hardware. See [`docs/research-notes.md`](research-notes.md) for the sourced quotes/URLs, [`docs/design-brief.md`](design-brief.md) for the v0.2.0 soft-knee rationale, and [`docs/design-brief-v3-dynamics.md`](design-brief-v3-dynamics.md) for v0.3.0's Ratio/Range dynamics extension.
 
+**v0.5.0: the flagship dynamics core.** Every band's detector gains a selectable **Peak/RMS** law, a program-dependent **Auto Release**, a **VCA** character, and a **Stereo Link** control. A global **Lookahead** and **Mix**, selectable **crossover slopes** (12/24/48 dB/oct), an **external sidechain** with per-band keying and detector-key monitoring, and **hold + hysteresis** on every gate complete the set. All twenty-three new controls default to a fully neutral state, so a v0.4.0 session opened in v0.5.0 sounds exactly as it did - and reports the same zero latency.
+
 **v0.3.0: true dynamic multiband.** Every band's Ratio now spans **0.2:1 through 20:1** (previously 1:1-20:1) - values below 1:1 are *upward* compression/expansion: signal above threshold gets boosted instead of cut, tapering smoothly through an exact null at 1:1. A new per-band **Range** control clamps the maximum gain change (up or down) so an aggressive Ratio setting stays musically usable instead of running away. Both are described in the tables below.
 
 ## Parameter reference
@@ -85,6 +87,42 @@ The gate runs independently of, and in parallel with, that band's own compressor
 
 Because L + R after decode depends only on Mid (algebraically independent of whatever happens to Side), processing the Side component - however aggressively - can never introduce a phase-cancellation artifact into a mono downmix; only changing the Mid component's own processing changes the mono sum, which is the intended, audible effect of compressing/expanding the centre.
 
+### Global controls *(new in v0.5.0)*
+
+| Parameter | Range | Default | Unit | What it does |
+|---|---|---|---|---|
+| **SC Source** (Sidechain Source) | Internal / External | Internal | | Chooses what every band's compressor detector listens to. *Internal* is the band's own signal, exactly as before. *External* keys the detectors off the sidechain bus instead - split by its own crossover pair at the same frequencies and slope, so each band follows a band-matched key rather than the full-range sidechain. If you select External but the host has not connected a sidechain, Triptych falls back to Internal silently rather than falling quiet. |
+| **SC Listen** (Sidechain Listen) | Off / Low / Mid / High | Off | | Replaces the output with the selected band's **detector key** so you can hear exactly what the detectors are following while you set thresholds. This is *not* a band solo - it is the key signal, not the processed audio. A monitoring aid; not meant for automation. |
+| **Slope** (Crossover Slope) | 12 / 24 / 48 dB/oct | 24 dB/oct | | The steepness of both crossover splits. 24 dB/oct is the classic setting and what every earlier version used. 12 dB/oct overlaps the bands more (gentler, more "analogue" band interaction); 48 dB/oct separates them hard, which is what you want when a band's processing must not bleed into its neighbours. Switching slope resets the crossover filters and can click - change it while the transport is stopped. |
+| **Lookahead** | Off / 1.5 / 3 / 5 ms | Off | | Lets the detectors see the signal before it arrives, so gain reduction is already in place when a transient hits. Costs exactly that much latency, reported to the host for delay compensation (see the latency table below). Off is the default and keeps Triptych at zero latency. |
+| **Mix** | 0 – 100 | 100 | % | Dry/wet blend around the whole multiband chain - parallel compression without a separate bus. The dry path is delayed to match the Lookahead setting, so the two stay aligned. Note that blending a *minimum-phase* multiband tree against a dry signal will colour the result even at gentle settings: Triptych's band sum is magnitude-flat but not phase-flat, so the two paths interact. That is inherent to parallel-mixing any minimum-phase multiband processor, not a defect - use your ears rather than assuming 50% is "half the effect". |
+
+### Per-band detector *(new in v0.5.0)*
+
+Identical ranges on every band.
+
+| Parameter | Range | Default | Unit | What it does |
+|---|---|---|---|---|
+| **Detector** | Peak / RMS | Peak | | The detection law. *Peak* follows the waveform's instantaneous peaks - the tighter, more transient-aware behaviour every earlier version used. *RMS* follows the signal's average power instead, which for a sine reads 3 dB below the peak law and generally sounds smoother and more "level-related" than "transient-related". RMS uses a mean-square time constant of `max(Attack, 5 ms)` before the band's own Attack/Release ballistics. |
+| **Auto Rel** (Auto Release) | Off / On | Off | | Program-dependent release. Two release constants run in parallel - a fast one (0.15 s) and a slow reservoir (charge 0.6 s, release 4 s) - and the envelope takes whichever is higher. A brief peak recovers quickly; sustained gain reduction builds a multi-second tail that keeps the band from pumping. The Release knob scales both constants, so it still does what you expect; at around 300 ms it reproduces the reference values exactly. |
+| **Character** | Clean / VCA | Clean | | *Clean* is the feed-forward behaviour of every earlier version. *VCA* statically approximates a feedback compressor's loop: the knee rounds by a ratio-dependent amount (about 6 dB at 2:1, 4 dB at 4:1, 3 dB at 10:1) and the effective attack gets faster as the ratio rises. There is deliberately **no** added distortion or harmonic stage - the difference between the two is envelope behaviour, which is where the character of this class of compressor actually lives. |
+| **Link** (Stereo Link) | 0 – 100 | 0 | % | How much the two channels' detectors share an envelope. At 0% they are fully independent, which is what every earlier version did - and which lets a hard-panned transient pull one side down on its own and shift the stereo image. At 100% both channels apply exactly the same gain, so the image cannot move at all. Anything in between blends the two. In a band running Mid/Side, this links the Mid and Side pair instead. |
+
+**A note on the VCA knee near a 0 dB threshold.** Triptych's knee is *threshold-relative* by design (its width scales with how far the threshold sits below 0 dBFS - see [`docs/architecture.md`](architecture.md)). That means the VCA character's target knee width is unreachable once the threshold is within half a knee-width of 0 dB: from about -3 dB upward the achieved width narrows smoothly toward a hard knee, reaching exactly hard-knee at a 0 dB threshold. This is a property of the knee model, not a bug, and nothing misbehaves numerically there. If you want the full VCA rounding, keep the band's Threshold at -3 dB or below - which is where a multiband compressor's threshold normally sits anyway.
+
+### Per-band gate shaping *(new in v0.5.0)*
+
+| Parameter | Range | Default | Unit | What it does |
+|---|---|---|---|---|
+| **Gate Hold** | 0 – 500 | 0 | ms | How long the gate stays open after the signal falls back below its threshold. Set it longer than the gaps you want to ignore (the ring-out of a note, the space between two hits of the same part) and the gate stops chopping them up. The timer retriggers on every fresh crossing, so a run of closely spaced hits holds the gate open throughout. |
+| **Gate Hyst** (Gate Hysteresis) | 0 – 12 | 0 | dB | Separates the level at which the gate *opens* from the level at which it *closes*, closing this many dB lower. This is the cure for chatter - a signal hovering right at the threshold flipping the gate open and shut many times a second. Set it a few dB above the ripple you can hear; 3-6 dB handles most material. |
+
+Both are 0 by default, which is exactly the v0.4.0 gate. Both are also implemented so that neither can click: hold works on the gate's envelope rather than pinning its output gain, and the threshold moves through the same 50 ms smoother every other threshold change uses.
+
+### Gain-reduction meters *(new in v0.5.0)*
+
+Each band column carries a thin vertical bar showing how much that band is currently pulling the signal down (compressor and gate combined), with a slowly-decaying peak-hold line. Full scale is 24 dB. These are read-only - they exist so you can see at a glance which band is doing the work.
+
 ### Per-band Mute / Solo (Low, Mid, High)
 
 | Parameter | Values | Default | What it does |
@@ -105,9 +143,50 @@ Because L + R after decode depends only on Mid (algebraically independent of wha
 |---|---|---|---|---|
 | **Output** | -24 – +24 | 0 | dB | Master trim applied after the three bands are summed - the final gain stage in the plugin. Use it to match Triptych's output level to whatever follows it in the chain (typically a brickwall limiter on the master bus). |
 
+## Latency and host delay compensation *(new in v0.5.0)*
+
+With **Lookahead** at its default *Off*, Triptych reports **zero latency** - the crossovers are minimum-phase IIR and the detectors are causal, so nothing in the chain delays the signal. Every session saved before v0.5.0 keeps that behaviour, because the parameter did not exist.
+
+Engaging Lookahead reports exactly the following, and hosts compensate automatically:
+
+| Lookahead | 44.1 kHz | 48 kHz | 88.2 kHz | 96 kHz | 192 kHz |
+|---|---|---|---|---|---|
+| Off | 0 | 0 | 0 | 0 | 0 |
+| 1.5 ms | 66 | 72 | 132 | 144 | 288 |
+| 3 ms | 132 | 144 | 265 | 288 | 576 |
+| 5 ms | 221 | 240 | 441 | 480 | 960 |
+
+(Samples, rounded to the nearest whole sample - hosts only accept integer delay compensation.)
+
+Changing Lookahead while the transport is running makes the host re-negotiate its delay compensation, which most hosts handle with a brief interruption. That is industry-normal for any lookahead control; if it bothers you, set it before you press play.
+
+## Sidechain routing per host
+
+The sidechain input is **optional and disabled by default**, so Triptych loads normally in hosts that do not offer one (including its own Standalone build, which has no sidechain at all).
+
+- **Logic Pro (AU)**: pick the source track from the *Side Chain* menu in the plugin header, then set **SC Source** to *External*.
+- **Cubase / Nuendo (VST3)**: activate the side-chain input from the plugin header's side-chain button, then route a send to it from the source track.
+- **Reaper (VST3)**: give the Triptych track 4 input channels, route the source track to channels 3/4 of it, and pin channels 3/4 to the plugin's sidechain input in the plugin's routing matrix.
+- **Ableton Live (VST3/AU)**: Live does not expose sidechain inputs for third-party plugins in the way it does for its own devices; use a return/aux routing workaround or keep **SC Source** at *Internal*.
+- **Standalone**: no sidechain bus exists. *External* falls back to *Internal* silently.
+
+A mono sidechain is duplicated to both detector channels. The **gate** always keys internally, on the band's own signal, regardless of this setting - a gate is a bleed/noise tool for the material actually in the band.
+
+## Crossover slopes and phase
+
+Triptych's three bands come from two cascaded crossovers in series: the first splits Low from everything else, the second splits the remainder into Mid and High. That tree is **uncompensated** - the second split's phase rotation lands on Mid and High but not on Low. The band sum stays magnitude-flat (that is the Linkwitz-Riley property Triptych is built on), but it is not phase-flat, and the amount of rotation scales with the slope you choose:
+
+| Slope | Flat-sum accuracy | Phase behaviour |
+|---|---|---|
+| 12 dB/oct | within ±0.25 dB | half the rotation of the default |
+| 24 dB/oct | within ±0.1 dB | the reference behaviour, unchanged since v0.1 |
+| 48 dB/oct | within ±0.25 dB | twice the rotation of the default |
+
+This matters in exactly two situations: when you are mixing Triptych's output against a dry copy of the same signal (the **Mix** control, or an external parallel bus), and when someone measures the plugin with a phase-aware analyser. It does not matter for normal serial use. Low-branch all-pass compensation and a linear-phase mode are scheduled together for v0.6.0, where the change in default sound can be handled with a proper state-versioned migration.
+
 ## Presets
 
-Triptych ships with eight factory presets (Default, Density Glue, Peak Control, Low-End Tighten, De-Harsh Highs, Mastering Safety Ceiling, Parallel-Style Density, Hard Limiter Ceiling) covering both the peak-control and density mastering philosophies documented in [`docs/research-notes.md`](research-notes.md), plus single-band-focused workflow presets. See [`docs/presets.md`](presets.md) for what each one is for. The preset bar at the top of the plugin window lets you browse factory and user presets, save/rename/delete your own, set a default that loads on every fresh instance, and import/export single presets or whole preset banks (`.basilicapreset`/`.zip`). User presets are stored per-plugin under `~/Library/Audio/Presets/Yves Vogl/Triptych/` on macOS (`%APPDATA%\Yves Vogl\Triptych\Presets\` on Windows).
+Triptych ships with nine factory presets (Default, Density Glue, Peak Control, Low-End Tighten, De-Harsh Highs, Mastering Safety Ceiling, Parallel-Style Density, Hard Limiter Ceiling, Glue Master) covering both the peak-control and density mastering philosophies documented in [`docs/research-notes.md`](research-notes.md), plus single-band-focused workflow presets. See [`docs/presets.md`](presets.md) for what each one is for. The preset bar at the top of the plugin window lets you browse factory and user presets, save/rename/delete your own, set a default that loads on every fresh instance, and import/export single presets or whole preset banks (`.basilicapreset`/`.zip`). User presets are stored per-plugin under `~/Library/Audio/Presets/Yves Vogl/Triptych/` on macOS (`%APPDATA%\Yves Vogl\Triptych\Presets\` on Windows).
 
 ## Localisation
 
@@ -122,3 +201,8 @@ The preset bar's labels, menus, and dialogs follow your system language automati
 - **Mute, don't just turn Makeup down to -12 dB**, when you want to genuinely audition a mix without one band's contribution - Mute (and Solo) don't touch that band's compressor settings at all, so your dial-in isn't affected by the A/B.
 - **Set per-band Makeup to compensate for gain reduction, then use master Output for overall level matching** - keeping those two jobs separate makes it much easier to tell whether a mix problem is a per-band balance issue or a simple "everything's too loud/quiet" issue.
 - **Turn Range on before pushing Ratio below 1:1** (upward compression/expansion) - an upward band's boost grows the further above Threshold the signal sits, with no ceiling of its own. Range gives you a musically sane maximum before you start dialling in an aggressive upward setting, rather than discovering the ceiling by ear after the fact.
+- **Turn Stereo Link up before you chase a wandering image.** If a hard-panned hit makes the mix lean to one side when Triptych is engaged, that is the two channels' detectors acting independently. Link at 100% forces both channels to apply the same gain, which fixes it outright; 60-80% keeps some of the per-side responsiveness while pinning the image.
+- **Reach for Auto Release before you reach for a slower Release knob.** A slow release stops pumping but also makes the band sluggish on transients. Auto Release gives you both: quick recovery from short peaks, a long tail only when the band is genuinely working hard.
+- **Use SC Listen to set sidechain thresholds, not your imagination.** Switch it to the band you are keying, set the band's Threshold by ear against what you actually hear, then switch it back Off. It plays the key signal, not the band - which is exactly what a threshold relates to.
+- **Lookahead is for the safety ceiling, not for everything.** Its real payoff is the High band's brickwall, which becomes genuinely overshoot-proof once lookahead is on. If you are not using the limiter, the latency usually is not worth it.
+- **Pick the crossover slope for the job, not for the number.** 48 dB/oct when a band's processing must not bleed into its neighbours (a hard de-esser band, a tight low-end clamp); 12 dB/oct when you want the bands to hand over gently and behave more like a broadband compressor with a tilt.

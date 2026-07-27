@@ -2,6 +2,12 @@
 
 #include <juce_dsp/juce_dsp.h>
 
+#include <vector>
+
+#include "Detector.h"
+#include "GainReductionMeter.h"
+#include "Lookahead.h"
+
 // One compression band: threshold/ratio/knee feed-forward VCA compression
 // (a from-scratch gain computer, see src/dsp/KneeGainComputer.h, driven by
 // juce::dsp::BallisticsFilter's peak envelope follower) followed by a
@@ -65,7 +71,18 @@ public:
 
     // Processes `block` in place. Real-time safe: no allocation once
     // prepare() has completed. A zero-sample block is a safe no-op.
-    void process (juce::dsp::AudioBlock<float>& block) noexcept;
+    //
+    // `externalKey` (v0.5.0): an optional band-matched sidechain key the
+    // detectors should follow instead of the band's own audio. Must have the
+    // same sample count as `block`; nullptr (the default) keys the band
+    // internally, exactly as v0.4.0 did.
+    //
+    // `meter` (v0.5.0): an optional per-band gain-reduction tap, written once
+    // per call with the deepest compressor/gate reduction reached in the
+    // block. nullptr disables the tap entirely.
+    void process (juce::dsp::AudioBlock<float>& block,
+                  const juce::dsp::AudioBlock<const float>* externalKey = nullptr,
+                  trpt::BandGainReduction* meter = nullptr) noexcept;
 
     void setThresholdDb (float newThresholdDb);
     void setRatio (float newRatio);
@@ -163,6 +180,36 @@ public:
     void setSideThresholdDb (float newThresholdDb);
     void setSideRatio (float newRatio);
 
+    //==========================================================================
+    // v0.5.0 additions. Every one of them is neutral at its default, so a
+    // band whose new API is never touched reproduces v0.4.0 bit for bit (see
+    // Detector.h for the structural - not merely numerical - basis of that
+    // guarantee).
+
+    // Detector v2 (brief section 3.1-3.3).
+    void setDetectorLaw (Detector::Law newLaw) noexcept { detector.setLaw (newLaw); }
+    void setDetectorCharacter (Detector::Character newCharacter) noexcept { detector.setCharacter (newCharacter); }
+    void setAutoReleaseEnabled (bool shouldBeEnabled) noexcept { detector.setAutoReleaseEnabled (shouldBeEnabled); }
+    void setStereoLinkPercent (float newPercent) noexcept { detector.setStereoLinkPercent (newPercent); }
+
+    // Lookahead (brief section 3.4): the band's audio is delayed by this many
+    // samples while the detectors keep reading the undelayed key, so every
+    // envelope leads the audio it acts on. 0 (the default) bypasses the delay
+    // line structurally.
+    //
+    // When the optional limiter is ALSO enabled, the same delay is instead
+    // spent inside the lookahead brickwall (see setLimiterEnabled below), so
+    // the band's total latency is this value either way - a single global L
+    // is what the host is told and what every band actually adds.
+    void setLookaheadSamples (int newLookaheadSamples) noexcept;
+
+    // Gate hold and hysteresis (brief section 3.9). Both default to 0, which
+    // is the exact v0.4.0 gate: the hold timer never arms, the shadow held
+    // envelope stays at 0, and the effective threshold is the plain smoothed
+    // threshold.
+    void setGateHoldMs (float newHoldMs) noexcept;
+    void setGateHysteresisDb (float newHysteresisDb) noexcept;
+
 private:
     static constexpr double smoothingTimeSeconds = 0.05;
 
@@ -171,12 +218,19 @@ private:
     // brickwall catch" role the High-band limiter option is meant to play.
     static constexpr float limiterReleaseMs = 50.0f;
 
+    // Worst-case lookahead the delay lines are sized for in prepare(): 5 ms,
+    // the longest value the Lookahead parameter offers (see ParameterIds.h).
+    static constexpr double maximumLookaheadSeconds = 0.005;
+
     // v0.2.0's own knee-aware VCA gain computer, replacing v0.1's
     // juce::dsp::Compressor - see the class-level doc comment above and
-    // src/dsp/KneeGainComputer.h. Uses the exact same peak-detection
-    // envelope-follower class juce::dsp::Compressor used internally, so
-    // attack/release behaviour is unchanged from v0.1.
-    juce::dsp::BallisticsFilter<float> envelopeFilter;
+    // src/dsp/KneeGainComputer.h. As of v0.5.0 the envelope follower lives
+    // inside Detector (src/dsp/Detector.h), which in its neutral Peak/Clean
+    // configuration is a thin wrapper around the very same
+    // juce::dsp::BallisticsFilter call v0.4.0 made - so attack/release
+    // behaviour is unchanged from v0.1 unless a v0.5.0 detector control is
+    // actually engaged.
+    Detector detector;
     juce::dsp::Gain<float> makeupGain;
     juce::dsp::Limiter<float> limiter;
     bool limiterEnabled = false;
@@ -255,6 +309,46 @@ private:
     bool midSideEnabled = false;
     float lastSideThresholdDb = -18.0f;
     float lastSideRatio = 1.0f;
+
+    //==========================================================================
+    // v0.5.0 state.
+
+    // Lookahead (brief section 3.4). `audioDelay` gives the *compressor* its
+    // detector lead: the key is captured from the undelayed signal into
+    // keyBuffer, then the audio is delayed, so the envelope acts early.
+    // `lookaheadLimiter` is the alternative, overshoot-proof brickwall used
+    // when the optional limiter is engaged at the same time - it owns the
+    // delay in that case, so the band's total latency stays exactly
+    // lookaheadSamples either way.
+    trpt::LookaheadDelay audioDelay;
+    trpt::LookaheadLimiter lookaheadLimiter;
+    int lookaheadSamples = 0;
+
+    // Key scratch: the detectors' input when it differs from the band audio
+    // (external sidechain, or the undelayed capture taken before the
+    // lookahead delay). Sized in prepare(), never reallocated.
+    juce::AudioBuffer<float> keyBuffer;
+
+    // Per-sample gain trajectory scratch for the lookahead limiter.
+    std::vector<float> limiterGainScratch;
+
+    // Per-frame detector I/O scratch (one entry per channel).
+    std::vector<float> detectorKeyFrame;
+    std::vector<float> detectorEnvelopeFrame;
+    std::vector<float> gateEnvelopeFrame;
+
+    // Gate hold + hysteresis (brief section 3.9). The crossing state and the
+    // hold countdown are per band (the gate is a per-band decision); the
+    // shadow held envelope is per channel, because it composes with each
+    // channel's own gate envelope through a max().
+    float lastGateHoldMs = 0.0f;
+    float lastGateHysteresisDb = 0.0f;
+    float lastGateReleaseMs = 200.0f;
+    bool gateOpenState = false;
+    int gateHoldRemaining = 0;
+    std::vector<float> gateHoldState;
+
+    double sampleRate = 44100.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BandCompressor)
 };

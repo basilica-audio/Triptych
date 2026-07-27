@@ -1,7 +1,7 @@
 {
     "format": "basilica-preset-1",
     "plugin": "com.yvesvogl.triptych",
-    "pluginVersion": "0.4.0",
+    "pluginVersion": "0.5.0",
     "name": "Mastering Safety Ceiling",
     "category": "Master",
     "parameters": {
@@ -63,6 +63,29 @@
         "highSolo": false,
         "highLimiterEnabled": true,
         "highLimiterThreshold": -3.0,
-        "output": 0.0
+        "output": 0.0,
+        "scSource": 0,
+        "scListen": 0,
+        "crossoverSlope": 1,
+        "lookahead": 1,
+        "mix": 100.0,
+        "lowDetectorMode": 1,
+        "lowAutoRelease": false,
+        "lowCharacter": 0,
+        "lowStereoLink": 100.0,
+        "lowGateHold": 0.0,
+        "lowGateHysteresis": 0.0,
+        "midDetectorMode": 1,
+        "midAutoRelease": false,
+        "midCharacter": 0,
+        "midStereoLink": 100.0,
+        "midGateHold": 0.0,
+        "midGateHysteresis": 0.0,
+        "highDetectorMode": 1,
+        "highAutoRelease": false,
+        "highCharacter": 0,
+        "highStereoLink": 100.0,
+        "highGateHold": 0.0,
+        "highGateHysteresis": 0.0
     }
 }

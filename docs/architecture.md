@@ -101,7 +101,15 @@ Interaction with the flat-sum crossover null test (`tests/EngineTests.cpp`): M/S
 
 ## Latency
 
-Both the LR4 crossovers (minimum-phase IIR, no lookahead) and `juce::dsp::BallisticsFilter` (a causal envelope follower with no lookahead, driving `KneeGainComputer`'s gain computer - see above) add zero latency. `TriptychEngine::getLatencySamples()` is therefore a `static constexpr` `0`, and `TriptychAudioProcessor::prepareToPlay()` reports that via `setLatencySamples(0)`. There is no dry-path delay compensation anywhere in this plugin, unlike, e.g. Overture's oversampled clipper - see `tests/LatencyTests.cpp`. The M1 additions above (Mute/Solo, the High-band limiter) are both zero-latency too (see their sections above), so this remains true after them.
+Both the Linkwitz-Riley crossovers (minimum-phase IIR, no lookahead) and `juce::dsp::BallisticsFilter` (a causal envelope follower with no lookahead, driving `KneeGainComputer`'s gain computer - see above) add zero latency of their own.
+
+**Through v0.4.0** this made `TriptychEngine::getLatencySamples()` a `static constexpr 0` with no dry-path delay compensation anywhere in the plugin.
+
+**v0.5.0 consciously retires that as a *static* invariant while keeping it as a *default*.** `getLatencySamples()` is now a non-static accessor that returns the configured lookahead length in samples - which is `0` whenever the Lookahead parameter is Off, i.e. for every session saved before v0.5.0 and every fresh instance. `tests/LatencyTests.cpp` was **extended, not weakened**: the zero-when-Off assertions are still there, and T12 adds exact-value assertions for every lookahead setting at 44.1/48/96 kHz plus stability across block sizes 1/64/513/4096.
+
+The latency value is integer by construction (`round(seconds * fs)`), because hosts accept whole samples of delay compensation only. Because changing it invalidates the host's PDC graph, it is never applied from the audio thread: `processBlock` publishes the requested value, an `AsyncUpdater` calls `setLatencySamples()` on the message thread, and only once the host has been told does the audio thread reconfigure the engine. The engine therefore always processes at exactly the latency the host currently believes in.
+
+Every band delays its audio by the same L, so the three bands stay sample-aligned in the sum, and `juce::dsp::DryWetMixer::setWetLatency(L)` keeps the global Mix control's dry path aligned with the wet one.
 
 ## Parameter smoothing
 
@@ -129,7 +137,92 @@ The M2 i18n frame (`resources/i18n/de.txt`, installed via `Localisation::install
 - Crossover cutoff frequencies are clamped below Nyquist (`clampBelowNyquist`, in `TriptychEngine.cpp`) as defensive insurance against invalid `LinkwitzRileyFilter` coefficients at unusually low sample rates, and the Mid/High split is always clamped at least `minimumSplitSeparationHz` above the (possibly still-ramping) Low/Mid split so the two crossovers can never invert order mid-automation.
 - `PresetManager`'s only audio-thread-adjacent code is its `AudioProcessorValueTreeState::Listener::parameterChanged()` override (dirty-flag tracking) - implemented as a single lock-free `std::atomic<bool>` store, since JUCE does not document that callback as guaranteed message-thread-only. Every other `PresetManager`/`PresetBar` method does file I/O, JSON parsing, and `juce::String`/`juce::var` allocation, and is only ever called from the message thread (constructor, `PresetBar` UI callbacks) - never from `processBlock()`.
 
-## Deferred from M1: external sidechain and adjustable crossover slopes
+
+## Detector v2 (v0.5.0)
+
+`src/dsp/Detector.{h,cpp}` owns the compressor-side envelope for one band (the gate keeps its own, untouched `BallisticsFilter`). It layers three orthogonal capabilities over the v0.4.0 detector, each neutral at its default:
+
+- **Detection law.** Peak is a thin pass-through wrapper around the exact `juce::dsp::BallisticsFilter<float>` call v0.4.0 made - deliberately not a re-implementation. RMS runs `ms[n] = a*ms[n-1] + (1-a)*key[n]^2` with `tau_rms = max(Attack, 5 ms)` and feeds `sqrt(ms + 1e-30)` into the same ballistics, so switching law never changes which smoothing chain is in circuit.
+- **Program-dependent auto release.** A fast branching one-pole (release 0.15 s) in parallel with a slow reservoir (charge 0.6 s, release 4 s), combined by `max`. The Release knob scales both branch *release* constants by `Release / 300 ms`; the reservoir's charge constant is a fixed property and is not scaled. Taking the maximum of two monotonically decaying envelopes is what guarantees the tail never bounces.
+- **Variable stereo link.** `m_ch' = (1 - lambda) * m_ch + lambda * max(m_L, m_R)`, applied to the detector *inputs* rather than to the resulting envelopes. That ordering is load-bearing: at `lambda = 1` both channels integrate literally the same value sequence, so their ballistics state is bit-identical and the applied gains cannot differ by even one ULP.
+
+**The neutral path is structural, not numerical.** When the law is Peak, character is Clean, auto release is off and the smoothed link has settled at exactly 0, `Detector::isNeutral()` returns true and `BandCompressor` calls `processSampleLegacy()` - which is the literal v0.4.0 statement. No extra arithmetic touches the signal at all. That is what makes the v0.4.0 bit-identity guarantee a property of the code's shape rather than a numerical coincidence, and it is why `tests/StateTests.cpp`'s T1 can assert `==` on floats rather than a tolerance.
+
+## VCA character (v0.5.0)
+
+A static approximation of a feedback compressor's loop, chosen over an actual per-band feedback loop deliberately: band-splitting already masks the micro-envelope differences a real loop would produce, and a static approximation costs nothing at audio rate. Two effects, both pure coefficient math at parameter-change rate:
+
+- **Emergent soft knee.** The loop's static curve rounds more at low ratios: 6 dB at 2:1, 4 dB at 4:1, 3 dB at 10:1, log-interpolated in ratio and clamped to [3, 6] outside. Ratios below 1:1 mirror the table through `1/ratio`.
+- **Ratio-scaled effective attack.** `tau_eff = tau / (1 + k)`, `k = ratio - 1`, so higher ratios reach their gain reduction sooner - the loop-speedup signature. (The source brief wrote this factor as `k/(1+k)`, which inverts the direction and degenerates to an instantaneous attack at 1:1; `1/(1+k)` is what the derivation and the test plan's ordering both require, and it correctly leaves the time constant untouched at 1:1 where the loop is doing nothing.)
+
+**The knee mapping's degradation band.** `KneeGainComputer`'s knee is threshold-relative - its half width is `|T| * kneePercent / 100`, maxing out at `|T|`. Mapping a fixed target width `W` onto that means `kneePercent = 100*(W/2)/|T|`, which divides by zero at `T = 0 dB` (inside the shipped -60..0 range) and exceeds 100% whenever `|T| < W/2`. The shipped mapping is therefore clamped:
+
+```
+kneePercent_eff = min (100, 100 * (W/2) / max (|T|, W/2))
+```
+
+For `|T| >= W/2` this reproduces `W` exactly. Below that the achieved width degrades gracefully to `2*|T|` - the Weiss model's own maximum, so the target is genuinely unreachable there at any knee percent - reaching a hard knee at exactly `T = 0` with no division by zero, NaN or Inf anywhere in range. `tests/BandCompressorTests.cpp` pins the exact-mapping region (T16) and the degradation band (T16b) separately.
+
+## Lookahead and the overshoot-proof brickwall (v0.5.0)
+
+`src/dsp/Lookahead.h` is header-only and allocates only in `prepare()`. It provides a fixed FIFO delay, an amortised-O(1) sliding minimum (monotonic wedge deque in a ring buffer), a cascaded box smoother, and the brickwall built from them:
+
+```
+g_req[n] = min (1, threshold / max over channels |x[n]|)
+g_min[n] = min (g_req[n-L] ... g_req[n])          (window L + 1)
+G[n]     = cascaded-box smoothed g_min, FIR support S <= L
+G'[n]    = G[n] clamped by a 50 ms release-only recovery pole
+out[n]   = x[n-L] * G'[n]
+```
+
+**Zero-overshoot proof.** Every `g_min[m]` feeding `G[n]` has `m` in `[n-S, n]` with `S <= L`, and `g_min[m]` is a minimum over `[m-L, m]` - an interval that contains `n-L` for every such `m`. So every value averaged into `G[n]` is `<= g_req[n-L]`; an average of values all `<= g_req[n-L]` is itself `<= g_req[n-L]`; and the release pole only ever lowers it further. Therefore `|out[n]| <= threshold` for every sample, independent of program material. `tests/LookaheadLimiterTests.cpp` asserts this over 10,000 randomised segments per lookahead setting, driven well above full scale.
+
+**One delay per band, one reported latency.** Within a band, either the compressor gets the detector lead (audio delayed by L, detector reading the undelayed key) *or* - when the optional brickwall is engaged at the same time - that same L is spent inside the lookahead limiter instead. Exactly one of them owns the delay, so the band adds exactly L either way and every band stays aligned in the sum.
+
+**Documented deviation from the source brief.** The brief asked for both simultaneously in the High band. A genuine cascade of lookahead compressor and lookahead limiter needs 2L, because the limiter's sliding minimum must run on the *post-compressor* signal, whose future is not known at the time the compressor's gain is computed - and the brief also binds total latency to a single global L. Splitting the difference (limiter owns the delay when it is enabled) keeps both the exact-L latency contract and the zero-overshoot proof; the cost is that the High band's compressor loses its lead while the brickwall is engaged, which is the right trade for a stage whose entire job is the ceiling. Toggling the limiter while lookahead is engaged restructures the band's delay and can click, the same caveat class as the M/S and slope switches.
+
+## External sidechain (v0.5.0, issue #1 part 1)
+
+`TriptychAudioProcessor` declares a third bus - `.withInput("Sidechain", stereo(), false)` - **disabled by default**, because AU hosts routinely instantiate without one and auval exercises exactly that. `isBusesLayoutSupported` accepts the sidechain disabled, mono or stereo and never requires it. `processBlock` now indexes the main bus explicitly via `getBusBuffer(buffer, false, 0)`, since `buffer` is no longer just the main bus.
+
+When External is selected and a usable sidechain arrives, `TriptychEngine` runs it through a **second, independent crossover pair** at the same split frequencies and slope, so each band's detector consumes a band-matched key rather than the full-range sidechain. A mono sidechain is broadcast to both detector channels. When External is selected but no usable sidechain arrives, the engine falls back to internal keying silently and sample-exactly.
+
+`scListen` replaces the output with a selected band's detector key. It is deliberately not a band solo: the bands keep processing underneath while auditioning, so their envelopes stay continuous. The gate keys internally regardless of `scSource` - a gate is a bleed/noise tool for the material actually in the band.
+
+## Selectable crossover slopes (v0.5.0, issue #1 part 2)
+
+`Crossover` gains LR2 (squared 1st-order Butterworth, one TPT one-pole run twice down each chain, highpass emitted already polarity-inverted so the caller's plain LP + HP addition stays flat) and LR8 (squared 4th-order Butterworth, four TPT SVF sections down each chain at the Q pair 0.54119610 / 1.30656296). The LR4 path is byte-untouched, which `tests/CrossoverSlopeTests.cpp` (T9a) asserts sample-exactly against a directly instantiated legacy crossover.
+
+The three-band tree stays **uncompensated** at every slope. Adding low-branch all-pass compensation would change the LR4 default sound, which the v0.5.0 neutrality contract forbids; it is scheduled with the linear-phase mode for v0.6.0, where a state-versioned migration can carry the change deliberately. Per-slope flat-sum tolerances are asserted (±0.1 dB at 24 dB/oct, ±0.25 dB at 12 and 48) and `docs/manual.md` documents the phase behaviour honestly.
+
+## Gate hold and hysteresis (v0.5.0)
+
+The gate's gain is a memoryless static curve of a ballistics-smoothed envelope with **no gain-domain smoother after it**. That makes continuity, not timing, the hard part: pinning the target gain during hold and then releasing the pin steps the output in one sample, and hard-switching the threshold between `T_open` and `T_close` steps the curve by roughly `H * (ratio - 1)` dB - about 18 dB at H = 6 and 4:1. Both are audible clicks that timing-only tests would ship green.
+
+So both features are routed through existing smoothers:
+
+- **Hysteresis** moves a pair of targets (`T_open = T`, `T_close = T - H`); the *effective* threshold rides the existing 50 ms `gateThresholdSmoothed`, which remains the single writer of the curve's threshold input.
+- **Hold** lives in the **envelope** domain, not the gain domain: a per-channel shadow held envelope pinned at `T_close` while the timer runs, then decaying with the gate's own release coefficient, combined with the real envelope by `max`. Continuous at both ends by construction - at arm because the envelope is already at `T_close`, at expiry because the decay resumes from exactly the held value.
+- **Sequencing:** the gate counts as open for the whole hold duration, so the armed threshold flips back to `T_open` at hold *expiry*, not at hold arm - which is what lets the two mechanisms compose instead of fight.
+
+At hold 0 and hysteresis 0 the timer never arms, the shadow stays at 0, `env_eff == envelope` exactly, and the whole mechanism is structurally absent. `tests/GateGainComputerTests.cpp` (T13) asserts the timing behaviour, the chatter suppression, sample-exact v0.4.0 equivalence at the neutral setting, and a binding 0.5 dB/sample gain-step bound across every transition including the worst case.
+
+## State schema versioning (v0.5.0)
+
+`getStateInformation` stamps `stateVersion="5"` as a property on the APVTS root before serialising; `setStateInformation` reads it (absent means v0.4.0 or older). No 4 -> 5 transform is needed - the twenty-three additions are purely additive and neutral, and `AudioProcessorValueTreeState::replaceState()`'s existing tolerance leaves each missing ID at its constructor default, the same mechanism that carried the v0.2/v0.3/v0.4 additions. The attribute exists so that a future release with a genuinely non-neutral change has a hook to migrate from, rather than having to infer schema from which IDs happen to be present.
+
+## Deferred from v0.5.0
+
+- **Linear-phase FIR crossover mode.** Large, latency-heavy, and needs its own release with FIR design and pre-ring documentation.
+- **Low-branch all-pass compensation** for the three-band tree. Changes the default sound, so it belongs with the linear-phase release where a state-versioned migration can carry it.
+- **Oversampling / saturation-character stage.** v0.5.0 adds no static waveshaper - the VCA character is envelope behaviour, not distortion - so no oversampling is needed. The suite-wide oversampler lands with the character/saturation release.
+- **Per-band dry/wet mix.** Global Mix only this release.
+- **Detector sidechain EQ** (per-band SC HPF/LPF). The external sidechain plus band-split keying covers the main use case.
+- **Spectrum-on-curve analyser display.** M3 photoreal GUI scope; v0.5.0 ships GR bars only.
+- **Sample-accurate parameter interpolation.** The 50 ms block-boundary smoothing stays; revisit with the M3 GUI profiling pass.
+- **Gate range floor.** Hold and hysteresis cover the chatter problem, and a floor parameter cannot default neutrally without behaviour questions.
+
+## Resolved in v0.5.0: external sidechain and adjustable crossover slopes (was: Deferred from M1)
 
 Two items from the M1 "Complete and refine the DSP" issue were deliberately **not** landed in v0.1.0 - both were judged too high-risk to implement safely in this pass, and are left for a follow-up:
 
@@ -138,7 +231,7 @@ Two items from the M1 "Complete and refine the DSP" issue were deliberately **no
 
 Both remain open as GitHub issue #1 (left open, not closed by the v0.1.0 PR); see that issue's comments for the same reasoning. The **spectrum/GR display** portion of the same issue is a GUI concern, already covered by M3's "Custom GUI / LookAndFeel... Add metering where relevant" issue, and is deferred there rather than duplicated here.
 
-## Deferred from v0.2.0: RMS detector mode, program-dependent release (M/S resolved in v0.4.0)
+## Resolved in v0.5.0: RMS detector mode and program-dependent release (was: Deferred from v0.2.0; M/S resolved in v0.4.0)
 
 `docs/design-brief.md`'s honesty section named three further reference-class gaps the v0.2.0 research pass identified but deliberately left unimplemented:
 

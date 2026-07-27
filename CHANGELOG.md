@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-27
+
+**Flagship Dynamics Core.** Twenty-three new parameters, every one of them neutral at its default: a fresh v0.5.0 instance and every migrated v0.4.0 session render **sample-exactly** as they did before (proven by a same-binary A/B against the v0.4.0 chain, not by a tolerance - see `tests/LegacyReferenceChain.h`).
+
+### Added
+
+- **Detector v2** (`src/dsp/Detector.{h,cpp}`), per band:
+  - **Detection law** (`lowDetectorMode`/`midDetectorMode`/`highDetectorMode`, choice Peak/RMS, default Peak). RMS runs a mean-square one-pole at `tau_rms = max(Attack, 5 ms)` before the existing ballistics, reading the textbook 3.01 dB below peak detection on a sine.
+  - **Program-dependent auto release** (`lowAutoRelease` et al., default off): a dual-time-constant approximation of the classic dual-RC ladder - a fast branch (release 0.15 s) in parallel with a slow reservoir (charge 0.6 s, release 4 s), combined by maximum. A brief peak recovers on the fast branch; sustained gain reduction grows a multi-second tail. The Release knob scales both branch release constants, so the 300 ms region reproduces the reference constants exactly.
+  - **Per-band character** (`lowCharacter` et al., choice Clean/VCA, default Clean): a static approximation of a feedback compressor's loop, giving a ratio-dependent emergent soft knee (6 dB at 2:1, 4 dB at 4:1, 3 dB at 10:1, log-interpolated) and a ratio-scaled effective attack (`tau / (1 + k)`, `k = ratio - 1`), so higher ratios reach their gain reduction sooner. Deliberately **no** nonlinearity stage - the modelled behaviour is envelope behaviour, not distortion, so no oversampling is implied.
+  - **Variable stereo link** (`lowStereoLink` et al., 0-100%, default 0%): a max-law blend applied to the detector *inputs*, so at 100% both channels integrate the same value sequence and their envelopes are bit-identical - a hard-panned transient can no longer shift the stereo image.
+- **Lookahead** (`lookahead`, choice Off/1.5/3/5 ms, default Off), reported to the host as exact integer latency and re-reported from the message thread. With it engaged, the High band's optional brickwall becomes a **true lookahead limiter** whose zero-overshoot property is proven in `src/dsp/Lookahead.h` and asserted over 10,000 randomised signals per setting. Lookahead Off keeps the legacy `juce::dsp::Limiter` path, sample for sample, so every existing session is untouched.
+- **External sidechain** (issue #1, part 1): a disabled-by-default stereo sidechain bus, `scSource` (Internal/External) and `scListen` (Off/Low/Mid/High). The key is split by its own crossover pair at the same frequencies and slope, so every band's detector follows a band-matched key rather than the full-range sidechain. Selecting External with no sidechain connected falls back to Internal sample-exactly. `scListen` monitors a band's **detector key** - deliberately not the same thing as soloing that band's audio.
+- **Selectable crossover slopes** (issue #1, part 2): `crossoverSlope`, choice 12/24/48 dB/oct, default 24 dB/oct (the v0.1-v0.4 LR4 path, byte-untouched). Applies to both split points and to the sidechain's crossover pair.
+- **Global Mix** (`mix`, 0-100%, default 100%): a dry/wet blend around the whole multiband chain, wet-latency compensated so the dry path is delayed by exactly the lookahead length. Structurally bypassed at the neutral operating point rather than passed through at unity.
+- **Gate hold and hysteresis** (`lowGateHold`/`lowGateHysteresis` et al., 0-500 ms and 0-12 dB, both default 0). Both are specified so every discontinuity is routed through an existing smoother: hold lives in the envelope domain as a shadow held envelope that decays with the gate's own release coefficient, and the effective threshold rides the existing 50 ms smoother. The applied gate gain never steps more than 0.5 dB per sample, asserted across hold expiry and every hysteresis transition including the worst case.
+- **Per-band gain-reduction metering**: three thin vertical GR bars in the editor, fed by relaxed atomics written once per block.
+- **State schema versioning**: `getStateInformation` now stamps `stateVersion="5"` on the APVTS root. No 4 -> 5 transform is needed (the additions are purely additive and neutral), but the forward-migration hook now exists; an absent attribute means v0.4.0 or older.
+- One new factory preset, **Glue Master** - VCA character, auto release, RMS detection, 100% link, 90% mix, 1.5 ms lookahead.
+- Test suite broadened from 105 to 155 cases, including `tests/AllocationGuard.{h,cpp}` (ported from sibling plugin aureate): the audio thread is now gated against heap allocation with the full feature matrix engaged.
+
+### Changed
+
+- **Two factory presets deliberately revoiced** (the other six sound exactly as they did): **Mastering Safety Ceiling** gains 1.5 ms lookahead plus the high-band brickwall - which is what finally makes its name honest - along with 100% stereo link and RMS detection; **Density Glue** gains VCA character, auto release and 80% link on every band. See `docs/presets.md`.
+- `TriptychEngine::getLatencySamples()` is no longer a static `constexpr 0`. It returns 0 while lookahead is Off - the invariant every pre-v0.5.0 session relies on, still asserted - and otherwise the exact lookahead length in samples.
+- The plugin now declares a second (sidechain) input bus. A `BusesLayout` passed to `setBusesLayout()` must describe both input buses; the sidechain may be disabled, mono or stereo, and is never required.
+
+### Notes
+
+- All twenty-three new parameters use JUCE's `versionHint` **2** and are declared as one appended block after the fifty-nine shipped parameters. AUv2 (and therefore Logic) identifies automation lanes by parameter *index*, so this is what keeps v0.4.0 session automation working; a regression test pins the first 59 indices to their exact v0.4.0 IDs and order.
+- Deferred to v0.6.0: linear-phase crossover mode, low-branch all-pass compensation, per-band sidechain EQ, per-band mix, and the saturation/oversampling character stage. See `docs/architecture.md`.
+
 ## [0.4.0] - 2026-07-23
 
 ### Added

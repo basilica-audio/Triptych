@@ -1,12 +1,15 @@
 #include "PluginProcessor.h"
 #include "dsp/BandCompressor.h"
 #include "params/ParameterIds.h"
+#include "LegacyReferenceChain.h"
 #include "TestHelpers.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <vector>
 
 TEST_CASE ("State round-trip preserves non-default values of every parameter", "[state]")
 {
@@ -648,4 +651,321 @@ TEST_CASE ("State migration tolerance: a v0.3.0-shaped state (missing M/S IDs) l
     buffer.clear();
     juce::MidiBuffer midi;
     CHECK_NOTHROW (destination.processBlock (buffer, midi));
+}
+
+//==============================================================================
+// v0.5.0 "Flagship Dynamics Core" neutrality and migration (brief section 6).
+//
+// The methodology for every "bit-identical to v0.4.0" clause below is the
+// same-binary, same-process A/B render described in tests/LegacyReferenceChain.h:
+// side A is the shipping v0.5.0 object at neutral defaults, side B is the
+// v0.4.0 chain rebuilt from the very components v0.5.0 still links. There are
+// no stored golden buffers anywhere in this repo, and float-exact stored
+// fixtures would not survive the arch/compiler difference between CI and a
+// development machine anyway.
+
+namespace
+{
+    // A deterministic broadband probe plus a multitone - between them they
+    // exercise every band, the knee region and the crossover skirts.
+    std::vector<float> makeNeutralityProbe (double sampleRate, int numSamples)
+    {
+        std::vector<float> signal (static_cast<size_t> (numSamples), 0.0f);
+        juce::Random random (0x7A1E);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const auto t = static_cast<double> (i) / sampleRate;
+
+            // Multitone: one partial per band, plus noise.
+            auto value = 0.30 * std::sin (juce::MathConstants<double>::twoPi * 80.0 * t);
+            value += 0.25 * std::sin (juce::MathConstants<double>::twoPi * 900.0 * t);
+            value += 0.20 * std::sin (juce::MathConstants<double>::twoPi * 6500.0 * t);
+            value += 0.15 * (random.nextDouble() * 2.0 - 1.0);
+
+            signal[static_cast<size_t> (i)] = static_cast<float> (value);
+        }
+
+        return signal;
+    }
+
+    std::vector<float> renderThroughProcessor (TriptychAudioProcessor& processor,
+                                                const std::vector<float>& probe,
+                                                double sampleRate,
+                                                int blockSize)
+    {
+        processor.prepareToPlay (sampleRate, blockSize);
+
+        juce::AudioBuffer<float> buffer (2, blockSize);
+        juce::MidiBuffer midi;
+
+        std::vector<float> output;
+        output.reserve (probe.size());
+
+        for (size_t position = 0; position + static_cast<size_t> (blockSize) <= probe.size(); position += static_cast<size_t> (blockSize))
+        {
+            for (int channel = 0; channel < 2; ++channel)
+                for (int i = 0; i < blockSize; ++i)
+                    buffer.setSample (channel, i, probe[position + static_cast<size_t> (i)]);
+
+            processor.processBlock (buffer, midi);
+
+            for (int i = 0; i < blockSize; ++i)
+                output.push_back (buffer.getSample (0, i));
+        }
+
+        return output;
+    }
+
+    std::vector<float> renderThroughLegacyChain (TriptychAudioProcessor& parameterSource,
+                                                  const std::vector<float>& probe,
+                                                  double sampleRate,
+                                                  int blockSize)
+    {
+        LegacyReference::Engine engine;
+        LegacyReference::applyFromState (engine, parameterSource.apvts);
+
+        juce::dsp::ProcessSpec spec;
+        spec.sampleRate = sampleRate;
+        spec.maximumBlockSize = static_cast<juce::uint32> (blockSize);
+        spec.numChannels = 2;
+        engine.prepare (spec);
+
+        juce::AudioBuffer<float> buffer (2, blockSize);
+
+        std::vector<float> output;
+        output.reserve (probe.size());
+
+        for (size_t position = 0; position + static_cast<size_t> (blockSize) <= probe.size(); position += static_cast<size_t> (blockSize))
+        {
+            for (int channel = 0; channel < 2; ++channel)
+                for (int i = 0; i < blockSize; ++i)
+                    buffer.setSample (channel, i, probe[position + static_cast<size_t> (i)]);
+
+            auto block = juce::dsp::AudioBlock<float> (buffer);
+            engine.process (block);
+
+            for (int i = 0; i < blockSize; ++i)
+                output.push_back (buffer.getSample (0, i));
+        }
+
+        return output;
+    }
+
+    int countMismatches (const std::vector<float>& a, const std::vector<float>& b)
+    {
+        auto mismatches = 0;
+
+        for (size_t i = 0; i < std::min (a.size(), b.size()); ++i)
+            if (a[i] != b[i])
+                ++mismatches;
+
+        return mismatches;
+    }
+
+    // Builds a v0.4.0-shaped state tree: the 59 shipped IDs and nothing else.
+    juce::ValueTree makeV040ShapedState (TriptychAudioProcessor& source)
+    {
+        auto state = source.apvts.copyState();
+
+        static constexpr const char* v050Ids[] = {
+            ParamIDs::scSource, ParamIDs::scListen, ParamIDs::crossoverSlope, ParamIDs::lookahead, ParamIDs::mix,
+            ParamIDs::lowDetectorMode, ParamIDs::lowAutoRelease, ParamIDs::lowCharacter, ParamIDs::lowStereoLink, ParamIDs::lowGateHold, ParamIDs::lowGateHysteresis,
+            ParamIDs::midDetectorMode, ParamIDs::midAutoRelease, ParamIDs::midCharacter, ParamIDs::midStereoLink, ParamIDs::midGateHold, ParamIDs::midGateHysteresis,
+            ParamIDs::highDetectorMode, ParamIDs::highAutoRelease, ParamIDs::highCharacter, ParamIDs::highStereoLink, ParamIDs::highGateHold, ParamIDs::highGateHysteresis
+        };
+
+        for (const auto* id : v050Ids)
+        {
+            auto child = state.getChildWithProperty ("id", juce::String (id));
+
+            if (child.isValid())
+                state.removeChild (child, nullptr);
+        }
+
+        // v0.4.0 never wrote a schema stamp.
+        state.removeProperty (TriptychAudioProcessor::stateVersionProperty, nullptr);
+
+        return state;
+    }
+}
+
+// T1: a fresh v0.5.0 instance renders bit-identically to v0.4.0. Every one of
+// the twenty-three additions is structurally inert at its default - not
+// "close enough", literally the same instructions on the same samples.
+TEST_CASE ("T1: a fresh v0.5.0 instance is sample-exactly the v0.4.0 chain", "[state][regression][neutrality]")
+{
+    constexpr auto sampleRate = 48000.0;
+    constexpr int blockSize = 512;
+
+    const auto probe = makeNeutralityProbe (sampleRate, blockSize * 40);
+
+    TriptychAudioProcessor processor;
+    const auto shipped = renderThroughProcessor (processor, probe, sampleRate, blockSize);
+    const auto legacy = renderThroughLegacyChain (processor, probe, sampleRate, blockSize);
+
+    REQUIRE (shipped.size() == legacy.size());
+    REQUIRE (! shipped.empty());
+
+    // Sanity: the probe genuinely drives the compressors, so this is not a
+    // comparison of two silent buffers.
+    auto peak = 0.0f;
+    for (const auto sample : shipped)
+        peak = std::max (peak, std::abs (sample));
+    CHECK (peak > 0.1f);
+
+    CHECK (countMismatches (shipped, legacy) == 0);
+}
+
+// T1 (continued): every one of the twenty-three new parameters really does
+// default to its neutral value.
+TEST_CASE ("T1: every v0.5.0 parameter defaults neutral", "[state][regression][neutrality]")
+{
+    TriptychAudioProcessor processor;
+
+    const auto checkChoice = [&] (const char* id, int expectedIndex)
+    {
+        auto* parameter = dynamic_cast<juce::AudioParameterChoice*> (processor.apvts.getParameter (id));
+        REQUIRE (parameter != nullptr);
+        INFO (id);
+        CHECK (parameter->getIndex() == expectedIndex);
+    };
+
+    const auto checkBool = [&] (const char* id)
+    {
+        auto* parameter = dynamic_cast<juce::AudioParameterBool*> (processor.apvts.getParameter (id));
+        REQUIRE (parameter != nullptr);
+        INFO (id);
+        CHECK (parameter->get() == false);
+    };
+
+    const auto checkFloat = [&] (const char* id, float expected)
+    {
+        auto* parameter = processor.apvts.getParameter (id);
+        REQUIRE (parameter != nullptr);
+        INFO (id);
+        CHECK (parameter->convertFrom0to1 (parameter->getValue()) == Catch::Approx (expected).margin (1e-3));
+    };
+
+    checkChoice (ParamIDs::scSource, 0);        // Internal
+    checkChoice (ParamIDs::scListen, 0);        // Off
+    checkChoice (ParamIDs::crossoverSlope, 1);  // 24 dB/oct - the v0.4.0 LR4 path
+    checkChoice (ParamIDs::lookahead, 0);       // Off - latency stays 0
+    checkFloat (ParamIDs::mix, 100.0f);         // fully wet
+
+    for (const auto* id : { ParamIDs::lowDetectorMode, ParamIDs::midDetectorMode, ParamIDs::highDetectorMode })
+        checkChoice (id, 0);                    // Peak
+
+    for (const auto* id : { ParamIDs::lowCharacter, ParamIDs::midCharacter, ParamIDs::highCharacter })
+        checkChoice (id, 0);                    // Clean
+
+    for (const auto* id : { ParamIDs::lowAutoRelease, ParamIDs::midAutoRelease, ParamIDs::highAutoRelease })
+        checkBool (id);
+
+    for (const auto* id : { ParamIDs::lowStereoLink, ParamIDs::midStereoLink, ParamIDs::highStereoLink })
+        checkFloat (id, 0.0f);
+
+    for (const auto* id : { ParamIDs::lowGateHold, ParamIDs::midGateHold, ParamIDs::highGateHold })
+        checkFloat (id, 0.0f);
+
+    for (const auto* id : { ParamIDs::lowGateHysteresis, ParamIDs::midGateHysteresis, ParamIDs::highGateHysteresis })
+        checkFloat (id, 0.0f);
+}
+
+// T2: tolerant migration. A v0.4.0-shaped session (the 59 shipped IDs, no
+// schema stamp, none of the twenty-three additions) loads with every new
+// parameter at its neutral default and renders sample-exactly like T1.
+TEST_CASE ("T2: a v0.4.0-shaped session migrates to neutral defaults and renders identically", "[state][regression][migration]")
+{
+    constexpr auto sampleRate = 48000.0;
+    constexpr int blockSize = 512;
+
+    TriptychAudioProcessor source;
+    const auto v040State = makeV040ShapedState (source);
+
+    // The stripped tree really is v0.4.0-shaped.
+    CHECK (! v040State.hasProperty (TriptychAudioProcessor::stateVersionProperty));
+    CHECK (! v040State.getChildWithProperty ("id", juce::String (ParamIDs::mix)).isValid());
+    CHECK (v040State.getChildWithProperty ("id", juce::String (ParamIDs::lowThreshold)).isValid());
+
+    juce::MemoryBlock encoded;
+    {
+        const std::unique_ptr<juce::XmlElement> xml (v040State.createXml());
+        REQUIRE (xml != nullptr);
+        juce::AudioProcessor::copyXmlToBinary (*xml, encoded);
+    }
+
+    TriptychAudioProcessor migrated;
+    migrated.setStateInformation (encoded.getData(), static_cast<int> (encoded.getSize()));
+
+    // Every addition resolved to its neutral default.
+    const auto expectFloat = [&] (const char* id, float expected)
+    {
+        auto* parameter = migrated.apvts.getParameter (id);
+        REQUIRE (parameter != nullptr);
+        INFO (id);
+        CHECK (parameter->convertFrom0to1 (parameter->getValue()) == Catch::Approx (expected).margin (1e-3));
+    };
+
+    expectFloat (ParamIDs::mix, 100.0f);
+    expectFloat (ParamIDs::lowStereoLink, 0.0f);
+    expectFloat (ParamIDs::midGateHold, 0.0f);
+    expectFloat (ParamIDs::highGateHysteresis, 0.0f);
+
+    for (const auto* id : { ParamIDs::scSource, ParamIDs::scListen, ParamIDs::lookahead,
+                             ParamIDs::lowDetectorMode, ParamIDs::midCharacter, ParamIDs::highDetectorMode })
+    {
+        auto* parameter = dynamic_cast<juce::AudioParameterChoice*> (migrated.apvts.getParameter (id));
+        REQUIRE (parameter != nullptr);
+        INFO (id);
+        CHECK (parameter->getIndex() == 0);
+    }
+
+    {
+        auto* slope = dynamic_cast<juce::AudioParameterChoice*> (migrated.apvts.getParameter (ParamIDs::crossoverSlope));
+        REQUIRE (slope != nullptr);
+        CHECK (slope->getIndex() == 1);
+    }
+
+    // Latency is still zero, exactly as the migrated session expects.
+    migrated.prepareToPlay (sampleRate, blockSize);
+    CHECK (migrated.getLatencySamples() == 0);
+
+    // And the audio is sample-exactly the legacy render.
+    const auto probe = makeNeutralityProbe (sampleRate, blockSize * 30);
+    const auto migratedRender = renderThroughProcessor (migrated, probe, sampleRate, blockSize);
+    const auto legacy = renderThroughLegacyChain (migrated, probe, sampleRate, blockSize);
+
+    REQUIRE (migratedRender.size() == legacy.size());
+    CHECK (countMismatches (migratedRender, legacy) == 0);
+}
+
+// The schema-versioning hook itself: v0.5.0 stamps 5, and a stamped tree
+// round-trips through save/load with the attribute intact.
+TEST_CASE ("State schema version 5 is stamped on save and survives a round-trip", "[state][migration]")
+{
+    TriptychAudioProcessor source;
+
+    juce::MemoryBlock encoded;
+    source.getStateInformation (encoded);
+
+    const std::unique_ptr<juce::XmlElement> xml (juce::AudioProcessor::getXmlFromBinary (encoded.getData(), static_cast<int> (encoded.getSize())));
+    REQUIRE (xml != nullptr);
+
+    const auto tree = juce::ValueTree::fromXml (*xml);
+    REQUIRE (tree.isValid());
+    CHECK (static_cast<int> (tree.getProperty (TriptychAudioProcessor::stateVersionProperty, 0)) == TriptychAudioProcessor::stateSchemaVersion);
+    CHECK (TriptychAudioProcessor::stateSchemaVersion == 5);
+
+    TriptychAudioProcessor destination;
+    destination.setStateInformation (encoded.getData(), static_cast<int> (encoded.getSize()));
+
+    juce::MemoryBlock reEncoded;
+    destination.getStateInformation (reEncoded);
+
+    const std::unique_ptr<juce::XmlElement> reXml (juce::AudioProcessor::getXmlFromBinary (reEncoded.getData(), static_cast<int> (reEncoded.getSize())));
+    REQUIRE (reXml != nullptr);
+
+    const auto reTree = juce::ValueTree::fromXml (*reXml);
+    CHECK (static_cast<int> (reTree.getProperty (TriptychAudioProcessor::stateVersionProperty, 0)) == TriptychAudioProcessor::stateSchemaVersion);
 }

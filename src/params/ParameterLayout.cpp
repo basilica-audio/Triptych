@@ -269,6 +269,76 @@ namespace
             1.0f,
             juce::AudioParameterFloatAttributes().withLabel (":1")));
     }
+
+    // Detector v2 + gate shaping (v0.5.0): the six per-band parameters added
+    // by the "Flagship Dynamics Core" release. Factored for readability only -
+    // unlike every helper above, this one is CALLED after all fifty-nine
+    // existing declarations, and every parameter it adds carries versionHint 2
+    // (see ParameterIds.h's v0.5.0 block for both binding rules).
+    //
+    // All six defaults are neutral: Peak detection, auto release off, Clean
+    // character, no stereo link, no gate hold, no gate hysteresis - i.e.
+    // exactly the v0.4.0 band.
+    void addDetectorParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout,
+                                 const char* detectorModeId,
+                                 const char* autoReleaseId,
+                                 const char* characterId,
+                                 const char* stereoLinkId,
+                                 const char* gateHoldId,
+                                 const char* gateHysteresisId,
+                                 const juce::String& labelPrefix)
+    {
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { detectorModeId, 2 },
+            labelPrefix + " Detector",
+            juce::StringArray { "Peak", "RMS" },
+            0));
+
+        layout.add (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { autoReleaseId, 2 }, labelPrefix + " Auto Release", false));
+
+        // "VCA" is a generic circuit-class descriptor, the same convention as
+        // the already-shipped "FET Limiter" naming - no hardware brand names
+        // appear in any parameter name, UI string or preset name (the sourced
+        // circuit references live in docs/research-notes.md only).
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { characterId, 2 },
+            labelPrefix + " Character",
+            juce::StringArray { "Clean", "VCA" },
+            0));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { stereoLinkId, 2 },
+            labelPrefix + " Stereo Link",
+            juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f),
+            0.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("%")));
+
+        // Gate Hold: 0-500 ms. Deliberately a centre-skewed range rather than
+        // makeLogRange(): a true base-10 log mapping is undefined at the 0 ms
+        // endpoint that neutrality requires, so the taper is approximated with
+        // setSkewForCentre() instead, which reaches 0 exactly while still
+        // spending most of the travel on the short, musically useful holds.
+        auto gateHoldRange = juce::NormalisableRange<float> (0.0f, 500.0f, 0.01f);
+        gateHoldRange.setSkewForCentre (50.0f);
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { gateHoldId, 2 },
+            labelPrefix + " Gate Hold",
+            gateHoldRange,
+            0.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("ms")));
+
+        // Gate Hysteresis: 0-12 dB of separation between the opening and
+        // closing thresholds. It has to exceed the detector's own worst-case
+        // ripple to actually kill chatter; 3-6 dB is the useful region.
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { gateHysteresisId, 2 },
+            labelPrefix + " Gate Hysteresis",
+            juce::NormalisableRange<float> (0.0f, 12.0f, 0.01f),
+            0.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("dB")));
+    }
 }
 
 namespace trpt
@@ -387,6 +457,75 @@ namespace trpt
             juce::NormalisableRange<float> (-24.0f, 24.0f, 0.01f),
             0.0f,
             juce::AudioParameterFloatAttributes().withLabel ("dB")));
+
+        //======================================================================
+        // v0.5.0 "Flagship Dynamics Core": the twenty-three new parameters,
+        // appended here as ONE block after every declaration above and all
+        // carrying versionHint 2. Both rules are binding and asserted by
+        // tests/ParameterTests.cpp (T22) - see ParameterIds.h for why
+        // interleaving them into the per-band helpers above (house style
+        // everywhere else in this file) would break v0.4.0 AU session
+        // automation. Every default below is neutral.
+
+        // External sidechain (issue #1, part 1).
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { ParamIDs::scSource, 2 },
+            "Sidechain Source",
+            juce::StringArray { "Internal", "External" },
+            0));
+
+        // Detector-key monitoring, not band solo: this replaces the output
+        // with the selected band's key signal so the user can hear exactly
+        // what the detectors are following.
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { ParamIDs::scListen, 2 },
+            "Sidechain Listen",
+            juce::StringArray { "Off", "Low", "Mid", "High" },
+            0));
+
+        // Selectable crossover slopes (issue #1, part 2). Index 1 (24 dB/oct,
+        // LR4) is the default and the v0.1-v0.4 path.
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { ParamIDs::crossoverSlope, 2 },
+            "Crossover Slope",
+            juce::StringArray { "12 dB/oct", "24 dB/oct", "48 dB/oct" },
+            1));
+
+        // Lookahead. Discrete rather than continuous because every change
+        // re-reports latency to the host, which is a message-thread,
+        // PDC-invalidating event - industry-normal, but not something to do
+        // on a continuous automation lane.
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { ParamIDs::lookahead, 2 },
+            "Lookahead",
+            juce::StringArray { "Off", "1.5 ms", "3 ms", "5 ms" },
+            0));
+
+        // Global dry/wet mix, wet-latency compensated. 100% is fully wet -
+        // the v0.4.0 behaviour, and structurally bypassed at that value so the
+        // default path stays bit-identical (a "+ 0.0f" add can flip -0.0
+        // signs, so neutrality here is structural, not arithmetic).
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { ParamIDs::mix, 2 },
+            "Mix",
+            juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f),
+            100.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("%")));
+
+        addDetectorParameters (layout,
+                                ParamIDs::lowDetectorMode, ParamIDs::lowAutoRelease, ParamIDs::lowCharacter,
+                                ParamIDs::lowStereoLink, ParamIDs::lowGateHold, ParamIDs::lowGateHysteresis,
+                                "Low");
+
+        addDetectorParameters (layout,
+                                ParamIDs::midDetectorMode, ParamIDs::midAutoRelease, ParamIDs::midCharacter,
+                                ParamIDs::midStereoLink, ParamIDs::midGateHold, ParamIDs::midGateHysteresis,
+                                "Mid");
+
+        addDetectorParameters (layout,
+                                ParamIDs::highDetectorMode, ParamIDs::highAutoRelease, ParamIDs::highCharacter,
+                                ParamIDs::highStereoLink, ParamIDs::highGateHold, ParamIDs::highGateHysteresis,
+                                "High");
 
         return layout;
     }

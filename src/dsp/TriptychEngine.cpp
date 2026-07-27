@@ -1,5 +1,7 @@
 #include "TriptychEngine.h"
 
+#include <algorithm>
+
 namespace
 {
     // Keeps a requested split frequency safely below Nyquist regardless of
@@ -31,6 +33,17 @@ void TriptychEngine::prepare (const juce::dsp::ProcessSpec& spec)
 
     lowMidCrossover.prepare (spec);
     midHighCrossover.prepare (spec);
+    sidechainLowMidCrossover.prepare (spec);
+    sidechainMidHighCrossover.prepare (spec);
+
+    lowMidCrossover.setSlope (crossoverSlope);
+    midHighCrossover.setSlope (crossoverSlope);
+    sidechainLowMidCrossover.setSlope (crossoverSlope);
+    sidechainMidHighCrossover.setSlope (crossoverSlope);
+
+    lowBand.setLookaheadSamples (lookaheadSamples);
+    midBand.setLookaheadSamples (lookaheadSamples);
+    highBand.setLookaheadSamples (lookaheadSamples);
 
     lowBand.prepare (spec);
     midBand.prepare (spec);
@@ -47,6 +60,22 @@ void TriptychEngine::prepare (const juce::dsp::ProcessSpec& spec)
     midBuffer.setSize (numChannels, numSamples);
     highBuffer.setSize (numChannels, numSamples);
     muteSoloGainBuffer.setSize (3, numSamples);
+
+    sidechainInputBuffer.setSize (numChannels, numSamples);
+    sidechainLowBuffer.setSize (numChannels, numSamples);
+    sidechainMidHighBuffer.setSize (numChannels, numSamples);
+    sidechainMidBuffer.setSize (numChannels, numSamples);
+    sidechainHighBuffer.setSize (numChannels, numSamples);
+    listenBuffer.setSize (numChannels, numSamples);
+
+    // DryWetMixer house gotcha (JUCE 8.0.14): prime the wet proportion BEFORE
+    // reset(), otherwise the mixer starts its own internal ramp from 100% wet
+    // and the first block after prepare is not what the parameter says.
+    dryWetMixer.prepare (spec);
+    dryWetMixer.setMixingRule (juce::dsp::DryWetMixingRule::linear);
+    dryWetMixer.setWetMixProportion (juce::jlimit (0.0f, 1.0f, lastMixPercent * 0.01f));
+    dryWetMixer.setWetLatency (static_cast<float> (lookaheadSamples));
+    dryWetMixer.reset();
 
     lowMidSplitSmoothed.reset (sampleRate, smoothingTimeSeconds);
     lowMidSplitSmoothed.setCurrentAndTargetValue (lastLowMidSplitHz);
@@ -77,6 +106,10 @@ void TriptychEngine::reset()
 {
     lowMidCrossover.reset();
     midHighCrossover.reset();
+    sidechainLowMidCrossover.reset();
+    sidechainMidHighCrossover.reset();
+    dryWetMixer.reset();
+    gainReductionMeter.clear();
     lowBand.reset();
     midBand.reset();
     highBand.reset();
@@ -109,7 +142,38 @@ void TriptychEngine::setOutputDb (float newOutputDb)
     outputGain.setGainDecibels (newOutputDb);
 }
 
-void TriptychEngine::process (juce::dsp::AudioBlock<float>& block)
+void TriptychEngine::setCrossoverSlope (Crossover::Slope newSlope)
+{
+    if (newSlope == crossoverSlope)
+        return;
+
+    crossoverSlope = newSlope;
+
+    lowMidCrossover.setSlope (newSlope);
+    midHighCrossover.setSlope (newSlope);
+    sidechainLowMidCrossover.setSlope (newSlope);
+    sidechainMidHighCrossover.setSlope (newSlope);
+}
+
+void TriptychEngine::setLookaheadSamples (int newLookaheadSamples) noexcept
+{
+    lookaheadSamples = juce::jmax (0, newLookaheadSamples);
+
+    lowBand.setLookaheadSamples (lookaheadSamples);
+    midBand.setLookaheadSamples (lookaheadSamples);
+    highBand.setLookaheadSamples (lookaheadSamples);
+
+    dryWetMixer.setWetLatency (static_cast<float> (lookaheadSamples));
+}
+
+void TriptychEngine::setMixPercent (float newMixPercent)
+{
+    lastMixPercent = juce::jlimit (0.0f, 100.0f, newMixPercent);
+    dryWetMixer.setWetMixProportion (lastMixPercent * 0.01f);
+}
+
+void TriptychEngine::process (juce::dsp::AudioBlock<float>& block,
+                               const juce::dsp::AudioBlock<const float>* sidechain)
 {
     const auto requestedSamples = block.getNumSamples();
 
@@ -144,18 +208,36 @@ void TriptychEngine::process (juce::dsp::AudioBlock<float>& block)
 
     size_t position = 0;
 
+    // The external sidechain is only usable if it actually carries channels
+    // and covers the whole block; anything else (bus disabled, host handing us
+    // a short buffer) falls back to internal keying silently.
+    const auto usableSidechain = sidechain != nullptr
+                                   && sidechain->getNumChannels() > 0
+                                   && sidechain->getNumSamples() >= requestedSamples;
+
     while (position < requestedSamples)
     {
         const auto chunkSamples = juce::jmin (capacity, requestedSamples - position);
         auto chunkBlock = block.getSubBlock (position, chunkSamples).getSubsetChannelBlock (0, numChannels);
 
-        processChunk (chunkBlock);
+        if (usableSidechain)
+        {
+            const auto sidechainChannels = juce::jmin (sidechain->getNumChannels(), numChannels);
+            const auto sidechainChunk = sidechain->getSubBlock (position, chunkSamples).getSubsetChannelBlock (0, sidechainChannels);
+
+            processChunk (chunkBlock, &sidechainChunk);
+        }
+        else
+        {
+            processChunk (chunkBlock, nullptr);
+        }
 
         position += chunkSamples;
     }
 }
 
-void TriptychEngine::processChunk (juce::dsp::AudioBlock<float> workingBlock)
+void TriptychEngine::processChunk (juce::dsp::AudioBlock<float> workingBlock,
+                                    const juce::dsp::AudioBlock<const float>* sidechainChunk)
 {
     const auto numSamples = workingBlock.getNumSamples();
     const auto numChannels = workingBlock.getNumChannels();
@@ -172,6 +254,21 @@ void TriptychEngine::processChunk (juce::dsp::AudioBlock<float> workingBlock)
     lowMidCrossover.setCutoffFrequency (lowMidHz);
     midHighCrossover.setCutoffFrequency (midHighHz);
 
+    // Global dry/wet (v0.5.0): the dry tap is taken before the split and the
+    // wet return happens after the output trim, with the mixer's own wet
+    // latency set to the lookahead length so the two paths stay aligned.
+    // Structurally bypassed at the neutral operating point (fully wet with
+    // lookahead Off), so the default signal path never enters the mixer -
+    // neutrality here is structural, not arithmetic, because a "+ 0.0f" add
+    // can still flip a -0.0 sign.
+    const bool mixActive = lastMixPercent < 100.0f || lookaheadSamples > 0;
+
+    if (mixActive)
+    {
+        const juce::dsp::AudioBlock<const float> dryBlock (workingBlock);
+        dryWetMixer.pushDrySamples (dryBlock);
+    }
+
     auto lowBlock = juce::dsp::AudioBlock<float> (lowBuffer).getSubBlock (0, numSamples).getSubsetChannelBlock (0, numChannels);
     auto midHighBlock = juce::dsp::AudioBlock<float> (midHighBuffer).getSubBlock (0, numSamples).getSubsetChannelBlock (0, numChannels);
     auto midBlock = juce::dsp::AudioBlock<float> (midBuffer).getSubBlock (0, numSamples).getSubsetChannelBlock (0, numChannels);
@@ -183,9 +280,67 @@ void TriptychEngine::processChunk (juce::dsp::AudioBlock<float> workingBlock)
     const juce::dsp::AudioBlock<const float> midHighBlockConst (midHighBlock);
     midHighCrossover.process (midHighBlockConst, midBlock, highBlock);
 
-    lowBand.process (lowBlock);
-    midBand.process (midBlock);
-    highBand.process (highBlock);
+    // External sidechain (v0.5.0): the key is split by its own crossover pair
+    // at the same frequencies and slope, so every band's detector follows a
+    // band-matched key instead of the full-range sidechain signal.
+    const bool useExternalKey = sidechainExternal && sidechainChunk != nullptr;
+
+    auto sidechainLowBlock = juce::dsp::AudioBlock<float> (sidechainLowBuffer).getSubBlock (0, numSamples).getSubsetChannelBlock (0, numChannels);
+    auto sidechainMidHighBlock = juce::dsp::AudioBlock<float> (sidechainMidHighBuffer).getSubBlock (0, numSamples).getSubsetChannelBlock (0, numChannels);
+    auto sidechainMidBlock = juce::dsp::AudioBlock<float> (sidechainMidBuffer).getSubBlock (0, numSamples).getSubsetChannelBlock (0, numChannels);
+    auto sidechainHighBlock = juce::dsp::AudioBlock<float> (sidechainHighBuffer).getSubBlock (0, numSamples).getSubsetChannelBlock (0, numChannels);
+
+    if (useExternalKey)
+    {
+        sidechainLowMidCrossover.setCutoffFrequency (lowMidHz);
+        sidechainMidHighCrossover.setCutoffFrequency (midHighHz);
+
+        auto sidechainInputBlock = juce::dsp::AudioBlock<float> (sidechainInputBuffer).getSubBlock (0, numSamples).getSubsetChannelBlock (0, numChannels);
+
+        // A mono sidechain is broadcast to every detector channel.
+        for (size_t channel = 0; channel < numChannels; ++channel)
+        {
+            const auto sourceChannel = juce::jmin (channel, sidechainChunk->getNumChannels() - 1);
+            const auto* source = sidechainChunk->getChannelPointer (sourceChannel);
+            auto* destination = sidechainInputBlock.getChannelPointer (channel);
+
+            std::copy (source, source + numSamples, destination);
+        }
+
+        // Same two-stage tree as the main path, with its own filter state.
+        const juce::dsp::AudioBlock<const float> sidechainInput (sidechainInputBlock);
+        sidechainLowMidCrossover.process (sidechainInput, sidechainLowBlock, sidechainMidHighBlock);
+
+        const juce::dsp::AudioBlock<const float> sidechainRemainder (sidechainMidHighBlock);
+        sidechainMidHighCrossover.process (sidechainRemainder, sidechainMidBlock, sidechainHighBlock);
+    }
+
+    // Detector-key monitoring (v0.5.0): capture the audition signal before the
+    // bands consume it. Only touched while actually listening.
+    if (sidechainListen != SidechainListen::off)
+    {
+        const auto& source = sidechainListen == SidechainListen::low
+                               ? (useExternalKey ? sidechainLowBlock : lowBlock)
+                               : sidechainListen == SidechainListen::mid
+                                   ? (useExternalKey ? sidechainMidBlock : midBlock)
+                                   : (useExternalKey ? sidechainHighBlock : highBlock);
+
+        for (size_t channel = 0; channel < numChannels; ++channel)
+        {
+            const auto* from = source.getChannelPointer (channel);
+            auto* to = listenBuffer.getWritePointer (static_cast<int> (channel));
+
+            std::copy (from, from + numSamples, to);
+        }
+    }
+
+    const juce::dsp::AudioBlock<const float> lowKey (sidechainLowBlock);
+    const juce::dsp::AudioBlock<const float> midKey (sidechainMidBlock);
+    const juce::dsp::AudioBlock<const float> highKey (sidechainHighBlock);
+
+    lowBand.process (lowBlock, useExternalKey ? &lowKey : nullptr, &gainReductionMeter.low);
+    midBand.process (midBlock, useExternalKey ? &midKey : nullptr, &gainReductionMeter.mid);
+    highBand.process (highBlock, useExternalKey ? &highKey : nullptr, &gainReductionMeter.high);
 
     // Per-band Mute/Solo (M1): console-style - Mute always wins; if any band
     // is soloed, only soloed (and unmuted) bands reach the sum. Each band's
@@ -228,6 +383,23 @@ void TriptychEngine::processChunk (juce::dsp::AudioBlock<float> workingBlock)
             out[sample] = lowData[sample] * lowGainRamp[sample] + midData[sample] * midGainRamp[sample] + highData[sample] * highGainRamp[sample];
     }
 
+    // Detector-key monitoring replaces the processed output entirely - it is
+    // a monitoring aid, not a band solo (the bands themselves kept running
+    // above, so their envelopes stay continuous while auditioning).
+    if (sidechainListen != SidechainListen::off)
+    {
+        for (size_t channel = 0; channel < numChannels; ++channel)
+        {
+            const auto* from = listenBuffer.getReadPointer (static_cast<int> (channel));
+            auto* to = workingBlock.getChannelPointer (channel);
+
+            std::copy (from, from + numSamples, to);
+        }
+    }
+
     juce::dsp::ProcessContextReplacing<float> context (workingBlock);
     outputGain.process (context);
+
+    if (mixActive)
+        dryWetMixer.mixWetSamples (workingBlock);
 }

@@ -122,9 +122,18 @@ namespace trpt
             reset (1.0f);
         }
 
+        // Changing the window is a structural reconfigure, not a smoothly
+        // rampable value, so the wedge is cleared with it - otherwise entries
+        // stored under the old window can outlive their validity.
         void setWindow (int newWindow) noexcept
         {
-            window = juce::jlimit (1, juce::jmax (1, static_cast<int> (values.size()) - 1), newWindow);
+            const auto clamped = juce::jlimit (1, juce::jmax (1, static_cast<int> (values.size()) - 1), newWindow);
+
+            if (clamped == window)
+                return;
+
+            window = clamped;
+            reset (primeValue);
         }
 
         void reset (float fillValue) noexcept
@@ -202,23 +211,36 @@ namespace trpt
             reset (1.0f);
         }
 
+        // Both stages carry a running sum that must stay exactly equal to the
+        // sum of their `length` stored samples. Changing the length while the
+        // buffers hold history for a different length would break that
+        // invariant (and, once the sums drift, produce gains above 1 - i.e.
+        // amplification from a limiter), so the state is re-primed here.
         void setLength (int newLength) noexcept
         {
-            length = juce::jlimit (1, static_cast<int> (first.size()), newLength);
+            const auto clamped = juce::jlimit (1, static_cast<int> (first.size()), newLength);
+
+            if (clamped == length)
+                return;
+
+            length = clamped;
+            reset (fillValue);
         }
 
         // Total FIR support in samples: the smoothed output at n depends on
         // inputs [n - getSupport(), n].
         int getSupport() const noexcept { return 2 * length - 2; }
 
-        void reset (float fillValue) noexcept
+        void reset (float newFillValue) noexcept
         {
+            fillValue = newFillValue;
+
             std::fill (first.begin(), first.end(), fillValue);
             std::fill (second.begin(), second.end(), fillValue);
             firstIndex = 0;
             secondIndex = 0;
-            firstSum = fillValue * static_cast<double> (length);
-            secondSum = fillValue * static_cast<double> (length);
+            firstSum = static_cast<double> (fillValue) * static_cast<double> (length);
+            secondSum = static_cast<double> (fillValue) * static_cast<double> (length);
         }
 
         float process (float input) noexcept
@@ -248,6 +270,7 @@ namespace trpt
         int secondIndex = 0;
         double firstSum = 0.0;
         double secondSum = 0.0;
+        float fillValue = 1.0f;
     };
 
     //==========================================================================
@@ -285,7 +308,12 @@ namespace trpt
             slidingMinimum.prepare (maximumLookaheadSamples + 1);
             smoother.prepare (juce::jmax (1, maximumLookaheadSamples / 2));
 
-            setLookaheadSamples (lookaheadSamples);
+            // Force a full reconfigure of the freshly-allocated primitives:
+            // setLookaheadSamples() early-returns when the value is unchanged.
+            const auto configured = lookaheadSamples;
+            lookaheadSamples = -1;
+            setLookaheadSamples (configured);
+
             reset();
         }
 
@@ -304,7 +332,12 @@ namespace trpt
 
         void setLookaheadSamples (int newLookaheadSamples) noexcept
         {
-            lookaheadSamples = juce::jmax (0, newLookaheadSamples);
+            const auto clamped = juce::jmax (0, newLookaheadSamples);
+
+            if (clamped == lookaheadSamples)
+                return;
+
+            lookaheadSamples = clamped;
 
             delay.setDelaySamples (lookaheadSamples);
             slidingMinimum.setWindow (lookaheadSamples + 1);

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-31
+
+Race-fix patch release.
+
+### Fixed
+
+- **Data races on the lookahead latency handshake** (PR #34, ThreadSanitizer-confirmed). `prepareToPlay()` (host-chosen thread) and `handleAsyncUpdate()` (JUCE message thread) both called `setLatencySamples()`, which mutates a plain non-atomic member inside `juce::AudioProcessor` itself; `appliedLookaheadSamples`/`preparedSampleRate` were likewise plain members shared across unsynchronized threads. Fixed by serializing the two entry points behind a mutex the audio thread never takes and making the shared members atomic. Red/green-verified under TSan (race reproduces 100% with the fix stashed, zero warnings with it restored). New regression guard: `tests/CrossThreadReprepareTests.cpp`; the allocation guard also gained an elision-safe self-test (this repo had none).
+
 ## [0.5.0] - 2026-07-27
 
 **Flagship Dynamics Core.** Twenty-three new parameters, every one of them neutral at its default: a fresh v0.5.0 instance and every migrated v0.4.0 session render **sample-exactly** as they did before (proven by a same-binary A/B against the v0.4.0 chain, not by a tolerance - see `tests/LegacyReferenceChain.h`).

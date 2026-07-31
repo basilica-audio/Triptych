@@ -436,14 +436,26 @@ int TriptychAudioProcessor::resolveLookaheadSamples() const noexcept
     const auto seconds = lookaheadSecondsForChoice (choice);
 
     // Integer by construction: hosts accept whole samples of PDC only.
-    return static_cast<int> (std::lround (static_cast<double> (seconds) * preparedSampleRate));
+    return static_cast<int> (std::lround (static_cast<double> (seconds) * preparedSampleRate.load (std::memory_order_relaxed)));
 }
 
 void TriptychAudioProcessor::handleAsyncUpdate()
 {
-    // Message thread: tell the host first. Only after the host knows does the
-    // audio thread reconfigure the engine (see processBlock), so the engine
-    // never runs at a latency the host has not been told about.
+    // Always the real JUCE message thread (juce::AsyncUpdater's own
+    // contract). prepareToPlay() below can run on a different, host-chosen
+    // thread and touches the exact same state (requestedLookaheadSamples/
+    // reportedLookaheadSamples, and setLatencySamples() itself), so both are
+    // serialised through asyncHandshakeMutex - never taken by processBlock()
+    // - to structurally rule out the two entry points racing (see
+    // PluginProcessor.h's comment on asyncHandshakeMutex and
+    // tests/CrossThreadReprepareTests.cpp for the full writeup and
+    // ThreadSanitizer confirmation that this race is real, not just
+    // theoretical).
+    const std::scoped_lock lock (asyncHandshakeMutex);
+
+    // Tell the host first. Only after the host knows does the audio thread
+    // reconfigure the engine (see processBlock), so the engine never runs at
+    // a latency the host has not been told about.
     const auto requested = requestedLookaheadSamples.load (std::memory_order_relaxed);
 
     setLatencySamples (requested);
@@ -453,7 +465,7 @@ void TriptychAudioProcessor::handleAsyncUpdate()
 //==============================================================================
 void TriptychAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    preparedSampleRate = sampleRate;
+    preparedSampleRate.store (sampleRate, std::memory_order_relaxed);
 
     juce::dsp::ProcessSpec spec;
     spec.sampleRate = sampleRate;
@@ -466,21 +478,38 @@ void TriptychAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     // actual parameter values rather than the engine's built-in defaults.
     pushParametersToEngine();
 
-    // Lookahead is resolved here, on the message thread, before prepare()
-    // sizes and primes everything - so the very first block already runs at
-    // the latency the host is about to be told about.
-    appliedLookaheadSamples = resolveLookaheadSamples();
-    requestedLookaheadSamples.store (appliedLookaheadSamples, std::memory_order_relaxed);
-    reportedLookaheadSamples.store (appliedLookaheadSamples, std::memory_order_release);
-    engine.setLookaheadSamples (appliedLookaheadSamples);
+    // Lookahead is resolved here, before prepare() sizes and primes
+    // everything, so the very first block already runs at the latency the
+    // host is about to be told about. This is called by the host on
+    // whatever thread it chooses - the VST3/AU contract guarantees only
+    // that it is not the audio thread, NOT that it is JUCE's own message
+    // thread - so the requestedLookaheadSamples/reportedLookaheadSamples
+    // read-modify-write and the setLatencySamples() call below are
+    // serialised against handleAsyncUpdate() through asyncHandshakeMutex
+    // (see that method's comment and PluginProcessor.h).
+    const auto resolvedLookahead = resolveLookaheadSamples();
+    appliedLookaheadSamples.store (resolvedLookahead, std::memory_order_relaxed);
+    engine.setLookaheadSamples (resolvedLookahead);
+
+    {
+        const std::scoped_lock lock (asyncHandshakeMutex);
+        requestedLookaheadSamples.store (resolvedLookahead, std::memory_order_relaxed);
+        reportedLookaheadSamples.store (resolvedLookahead, std::memory_order_release);
+    }
 
     engine.prepare (spec);
 
     // Zero while lookahead is Off - the v0.1-v0.4 invariant every existing
     // session relies on. Otherwise exactly the lookahead length in samples;
     // the LR crossovers (minimum-phase IIR) and the causal, ballistics-driven
-    // gain computers add nothing on top of it.
-    setLatencySamples (engine.getLatencySamples());
+    // gain computers add nothing on top of it. Serialised against
+    // handleAsyncUpdate()'s own setLatencySamples() call for the same reason
+    // as above - both write juce::AudioProcessor's own non-atomic internal
+    // latencySamples member.
+    {
+        const std::scoped_lock lock (asyncHandshakeMutex);
+        setLatencySamples (engine.getLatencySamples());
+    }
 }
 
 void TriptychAudioProcessor::releaseResources()
@@ -547,11 +576,11 @@ void TriptychAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // switch safe mid-playback.
     const auto desiredLookahead = resolveLookaheadSamples();
 
-    if (desiredLookahead != appliedLookaheadSamples)
+    if (desiredLookahead != appliedLookaheadSamples.load (std::memory_order_relaxed))
     {
         if (reportedLookaheadSamples.load (std::memory_order_acquire) == desiredLookahead)
         {
-            appliedLookaheadSamples = desiredLookahead;
+            appliedLookaheadSamples.store (desiredLookahead, std::memory_order_relaxed);
             engine.setLookaheadSamples (desiredLookahead);
             engine.reset();
         }

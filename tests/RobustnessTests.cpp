@@ -406,6 +406,41 @@ TEST_CASE ("T14: processBlock allocates nothing with the full v0.5.0 feature mat
     CHECK (TestHelpers::allSamplesFinite (buffer));
 }
 
+// The allocation guard itself: T14 above (and every other AllocationGuard-
+// backed test in this suite) is only meaningful if TestAlloc::AllocationGuard
+// actually observes a real heap allocation while active, and stays silent
+// otherwise. A naive self-test using a new-expression (e.g. `new float[64]`
+// immediately followed by `delete[]`) is not sufficient: per [expr.new],
+// a conforming compiler is permitted to elide a new-expression whose
+// storage is never observably used, which would silently make this self-test
+// (and, by extension, every guarded assertion in the suite) vacuous in an
+// optimised build. Using ::operator new directly plus a volatile write to
+// the returned storage forces the allocation to actually happen and be
+// observed - the same pattern sibling plugin Requiem uses
+// (tests/EngineTests.cpp, "6.12 The allocation guard itself works").
+TEST_CASE ("The allocation guard itself works", "[robustness][allocation]")
+{
+    {
+        const TestAlloc::AllocationGuard guard;
+
+        auto* deliberate = static_cast<float*> (::operator new (64 * sizeof (float)));
+        *static_cast<volatile float*> (deliberate) = 1.0f;
+        ::operator delete (deliberate);
+
+        CHECK (guard.count() > 0);
+    }
+
+    {
+        const TestAlloc::AllocationGuard guard;
+
+        volatile auto sum = 0.0f;
+        for (int i = 0; i < 1000; ++i)
+            sum = sum + static_cast<float> (i);
+
+        CHECK (guard.count() == 0);
+    }
+}
+
 // T15: NaN, Inf and denormal input with every new parameter at an extreme
 // must not produce non-finite output, and the engine must recover once the
 // input becomes sane again.

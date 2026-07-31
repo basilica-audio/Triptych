@@ -6,6 +6,9 @@
 #include "dsp/TriptychEngine.h"
 #include "presets/PresetManager.h"
 
+#include <atomic>
+#include <mutex>
+
 // Triptych: a 3-band multiband compressor for dense metal mixes. Signal flow
 // lives in TriptychEngine (src/dsp) so it stays unit-testable independent of
 // this AudioProcessor; this class is just APVTS + host plumbing around it.
@@ -195,15 +198,47 @@ private:
     // message thread, and only once the host has been told does the audio
     // thread actually reconfigure the engine - so the engine always processes
     // at exactly the latency the host currently believes in.
+    //
+    // Cross-thread hardening (see tests/CrossThreadReprepareTests.cpp for
+    // the full writeup - this mirrors the fix shipped for the equivalent bug
+    // class in sibling plugin Nave, PR #28). Two distinct entry points touch
+    // this handshake's state without the host guaranteeing anything about
+    // their relative threading: prepareToPlay() (called by the host on
+    // whatever thread it chooses - the VST3/AU contract guarantees only that
+    // this is not the audio thread, not that it is JUCE's own message
+    // thread) and handleAsyncUpdate() (always the real JUCE message thread).
+    // Both call AudioProcessor::setLatencySamples(), whose own internal
+    // state (JUCE 8.0.14's AudioProcessor::latencySamples) is a plain,
+    // non-atomic int with no internal synchronisation - confirmed by
+    // ThreadSanitizer to race in practice, not just in theory - so the two
+    // entry points are serialised below by asyncHandshakeMutex, never taken
+    // by processBlock() or anything it calls (no lock/allocation added to
+    // the audio thread).
+    std::mutex asyncHandshakeMutex;
+
     // The rate prepareToPlay() was last called with. Deliberately NOT
     // AudioProcessor::getSampleRate(), which is only populated by the host
     // wrapper's setRateAndBufferSizeDetails() call and therefore reads 0 for
     // a processor driven directly (as every unit test does).
-    double preparedSampleRate = 44100.0;
+    //
+    // Atomic (rather than a std::mutex-guarded plain double) because
+    // processBlock() - guaranteed the audio thread - reads it every block via
+    // resolveLookaheadSamples(), and no lock may be taken there; prepareToPlay()
+    // may run on a different, host-chosen thread, so an unsynchronised plain
+    // double would be a data race under the C++ memory model regardless of
+    // what any given host actually guarantees about serialising the two
+    // calls.
+    std::atomic<double> preparedSampleRate { 44100.0 };
 
     std::atomic<int> requestedLookaheadSamples { 0 };
     std::atomic<int> reportedLookaheadSamples { 0 };
-    int appliedLookaheadSamples = 0;
+
+    // Same rationale as preparedSampleRate above: written by prepareToPlay()
+    // (host-chosen thread) and both read and written by processBlock() (the
+    // audio thread) - two unsynchronised threads touching plain memory, so
+    // this has to be atomic even though only the audio thread ever performs
+    // the read-modify-write in processBlock().
+    std::atomic<int> appliedLookaheadSamples { 0 };
 
     void handleAsyncUpdate() override;
 

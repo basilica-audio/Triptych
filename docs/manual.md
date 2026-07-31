@@ -23,18 +23,35 @@ Reach for it when a single-band compressor either over-squashes the low end to c
 ## Signal flow
 
 ```
-                    +-> BandComp (Low)  --------------------------------+
-Input --> LR4 @ Low/Mid Split             |                             |
-                    \-> LR4 @ Mid/High Split                            |
-                              +-> BandComp (Mid)  ----------------------+--> Mute/Solo gate --> Sum --> Output --> Out
-                              \-> BandComp (High) + optional Limiter ---+
+                    +-> Band strip (Low)  ------------------------------+
+Input --> Split @ Low/Mid                 |                             |
+                    \-> Split @ Mid/High                                |
+                              +-> Band strip (Mid)  -------------------+--> Mute/Solo gate --> Sum --> Mix --> Output --> Out
+                              \-> Band strip (High) + optional Limiter -+                       ^
+                                                                                                |
+Input (dry, delayed to match Lookahead) ----------------------------------------------------------+
+
+Sidechain (optional) --> its own Split pair, same frequencies + slope --> per-band detector key
 ```
 
-Each band's own compressor (Knee → Threshold/Ratio → Range → Attack/Release + Makeup) runs first; the High band can additionally engage a brickwall-style Limiter after its compressor. Every band's contribution is then gated by its own Mute/Solo state before the three bands are summed and trimmed by the master Output control. See [`docs/architecture.md`](architecture.md) for the full engineering breakdown (flat-sum crossover property, the soft-knee gain computer, the v0.3.0 upward-ratio/Range extension, compressor bypass identity, limiter behaviour, parameter smoothing).
+Each band is a strip rather than a single compressor. Inside one strip:
+
+```
+key   --> Detector (Peak/RMS law -> Auto Release -> Stereo Link -> Character)
+             |  envelope
+audio --> Gate (own threshold, own detector) --> Compressor (Knee -> Threshold/Ratio -> Range) --> Makeup
+             \___ optionally wrapped in a Mid/Side encode/decode ___/
+```
+
+The **key** is the signal the compressor's detector listens to: the band's own audio (SC Source *Internal*), or the matching band of the sidechain (*External*). The **Gate** always keys internally on the band's own audio, whatever SC Source is set to. The gate's gain and the compressor's gain multiply, so gating a band is never masked by that band's own compression curve.
+
+The High band can additionally engage a brickwall-style Limiter after its compressor. Every band's contribution is then gated by its own Mute/Solo state, the three bands are summed, blended against the delay-compensated dry signal by **Mix**, and trimmed by the master **Output** control.
+
+The two split points use the same **Slope** setting (12, 24 or 48 dB/oct), as does the sidechain's own crossover pair. See [`docs/architecture.md`](architecture.md) for the full engineering breakdown (flat-sum crossover property, the soft-knee gain computer, the v0.3.0 upward-ratio/Range extension, detector v2, the lookahead brickwall's zero-overshoot proof, compressor bypass identity, limiter behaviour, parameter smoothing).
 
 **A note on the voicing.** The per-band defaults below (and the factory presets in [`docs/presets.md`](presets.md)) are **research-derived**, sourced from published manufacturer manuals and mastering-engineer technique articles for the multiband-compression reference class - not measured against reference hardware. See [`docs/research-notes.md`](research-notes.md) for the sourced quotes/URLs, [`docs/design-brief.md`](design-brief.md) for the v0.2.0 soft-knee rationale, and [`docs/design-brief-v3-dynamics.md`](design-brief-v3-dynamics.md) for v0.3.0's Ratio/Range dynamics extension.
 
-**v0.5.0: the flagship dynamics core.** Every band's detector gains a selectable **Peak/RMS** law, a program-dependent **Auto Release**, a **VCA** character, and a **Stereo Link** control. A global **Lookahead** and **Mix**, selectable **crossover slopes** (12/24/48 dB/oct), an **external sidechain** with per-band keying and detector-key monitoring, and **hold + hysteresis** on every gate complete the set. All twenty-three new controls default to a fully neutral state, so a v0.4.0 session opened in v0.5.0 sounds exactly as it did - and reports the same zero latency.
+**v0.5.0: the flagship dynamics core.** Every band's detector gains a selectable **Peak/RMS** law, a program-dependent **Auto Release**, a **VCA** character, and a **Stereo Link** control. A global **Lookahead** and **Mix**, selectable **crossover slopes** (12/24/48 dB/oct), an **external sidechain** with per-band keying and detector-key monitoring, and **hold + hysteresis** on every gate complete the set. All twenty-three new controls default to a fully neutral state, so a v0.4.0 session opened in v0.5.0 sounds exactly as it did - and reports the same zero latency. Existing automation survives too: the new parameters are appended after the fifty-nine that shipped earlier rather than inserted among them, so nothing an older session already automates changes position.
 
 **v0.3.0: true dynamic multiband.** Every band's Ratio now spans **0.2:1 through 20:1** (previously 1:1-20:1) - values below 1:1 are *upward* compression/expansion: signal above threshold gets boosted instead of cut, tapering smoothly through an exact null at 1:1. A new per-band **Range** control clamps the maximum gain change (up or down) so an aggressive Ratio setting stays musically usable instead of running away. Both are described in the tables below.
 
@@ -101,6 +118,8 @@ Because L + R after decode depends only on Mid (algebraically independent of wha
 
 Identical ranges on every band.
 
+These four controls shape the **compressor's** detector only. The band's Gate keeps its own, separate envelope follower with its own Attack/Release — so switching a band to RMS, or engaging Auto Release or VCA character, changes how that band *compresses* without changing how it *gates*.
+
 | Parameter | Range | Default | Unit | What it does |
 |---|---|---|---|---|
 | **Detector** | Peak / RMS | Peak | | The detection law. *Peak* follows the waveform's instantaneous peaks - the tighter, more transient-aware behaviour every earlier version used. *RMS* follows the signal's average power instead, which for a sine reads 3 dB below the peak law and generally sounds smoother and more "level-related" than "transient-related". RMS uses a mean-square time constant of `max(Attack, 5 ms)` before the band's own Attack/Release ballistics. |
@@ -122,6 +141,21 @@ Both are 0 by default, which is exactly the v0.4.0 gate. Both are also implement
 ### Gain-reduction meters *(new in v0.5.0)*
 
 Each band column carries a thin vertical bar showing how much that band is currently pulling the signal down (compressor and gate combined), with a slowly-decaying peak-hold line. Full scale is 24 dB. These are read-only - they exist so you can see at a glance which band is doing the work.
+
+### Controls to change with the transport stopped
+
+Every **continuous** control in Triptych is click-free by design — thresholds, ratios, knees, ranges, gains, stereo link and the gate's hold/hysteresis all move through smoothers, and the gate is specified so its gain can never step more than 0.5 dB in a single sample. Automate them freely.
+
+Four **stepped** controls restructure the signal path rather than move a value, and can click if you change them mid-playback:
+
+- **Slope** — resets the crossover filters.
+- **M/S On** — changes what the band's gain computation is applied to.
+- **Limiter (enable)** — click-free on its own, but while **Lookahead** is engaged, toggling it moves where that band spends its delay (see below), which restructures the band.
+- **Lookahead** — changes the reported latency, so the host has to re-negotiate delay compensation.
+
+None of these is a defect and none is unusual for the job it does; they are simply configuration changes rather than performance controls.
+
+**Where the lookahead delay lives.** With Lookahead engaged, a band spends its delay in one of two places: either the compressor gets the lead (the audio is delayed while the detector reads ahead), or — if that band's brickwall Limiter is also engaged — the Limiter takes the delay instead, which is what makes it genuinely overshoot-proof. Exactly one of them owns it, so the band always adds exactly the lookahead length and all three bands stay aligned in the sum. The trade is that the High band's compressor gives up its lead while the brickwall is on, which is the right call for a stage whose entire job is the ceiling.
 
 ### Per-band Mute / Solo (Low, Mid, High)
 
@@ -206,3 +240,12 @@ The preset bar's labels, menus, and dialogs follow your system language automati
 - **Use SC Listen to set sidechain thresholds, not your imagination.** Switch it to the band you are keying, set the band's Threshold by ear against what you actually hear, then switch it back Off. It plays the key signal, not the band - which is exactly what a threshold relates to.
 - **Lookahead is for the safety ceiling, not for everything.** Its real payoff is the High band's brickwall, which becomes genuinely overshoot-proof once lookahead is on. If you are not using the limiter, the latency usually is not worth it.
 - **Pick the crossover slope for the job, not for the number.** 48 dB/oct when a band's processing must not bleed into its neighbours (a hard de-esser band, a tight low-end clamp); 12 dB/oct when you want the bands to hand over gently and behave more like a broadband compressor with a tilt.
+
+## Known limitations
+
+- **The spectrum-on-curve analyser is not in this release.** v0.5.0 ships the three per-band gain-reduction bars only (see "Gain-reduction meters" above); a frequency-domain analyser overlay is scoped for the M3 custom-GUI milestone, not cut late.
+- **Deferred to v0.6.0+**: a linear-phase FIR crossover mode (paired with all-pass compensation for the phase behaviour below), per-band sidechain EQ, per-band dry/wet mix, sample-accurate parameter interpolation (today's smoothing resolves on a 50 ms timer rather than per sample), and a gate range floor.
+- **The three-band crossover tree is magnitude-flat but not phase-flat** at any Slope setting - see "Crossover slopes and phase" above. This only matters when mixing Triptych's output against a dry copy of the same signal (including via **Mix**) or when measuring with a phase-aware analyser; it does not matter for normal serial use.
+- **The VCA knee's target width becomes unreachable within about 3 dB of a 0 dB threshold** - see the note under "Per-band detector" above. The achieved width narrows smoothly toward a hard knee as the threshold approaches 0 dB; nothing misbehaves numerically, but the full VCA rounding needs a threshold at −3 dB or below.
+- **Four stepped controls can click if changed mid-playback** - Slope, M/S On, Limiter enable while Lookahead is engaged, and Lookahead itself - see "Controls to change with the transport stopped" above. Every continuous, automatable control is click-free by design.
+- **The voicing throughout is research-derived**, sourced from published manufacturer manuals and mastering-engineer technique articles for the multiband-compression reference class - not measured against reference hardware. See [`docs/research-notes.md`](research-notes.md) for the sourced findings.

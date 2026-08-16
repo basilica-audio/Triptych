@@ -20,6 +20,16 @@ namespace
             { return juce::mapFromLog10 (value, start, end); });
     }
 
+    // Ratio's lower bound (v0.3.0 / docs/design-brief-v3-dynamics.md): 0.2
+    // (i.e. "1:5") is the Weiss DS1-MK3 manual's own documented lower
+    // endpoint ("adjustable from 1000:1 to 1:5") for what it calls "upward
+    // expansion (for over-compressed signals)" - see docs/research-notes.md.
+    // Values below 1:1 boost signal above threshold instead of cutting it,
+    // continuously tapering through the exact null at 1:1 (see
+    // KneeGainComputer.h). The upper bound (20:1) is unchanged from v0.2.0.
+    constexpr float ratioMin = 0.2f;
+    constexpr float ratioMax = 20.0f;
+
     // Adds the six per-band parameters (Threshold, Ratio, Knee, Attack,
     // Release, Makeup) shared *structurally* by the Low/Mid/High bands, so
     // the ranges/units live in exactly one place - but per docs/design-brief.md
@@ -50,11 +60,19 @@ namespace
             thresholdDefaultDb,
             juce::AudioParameterFloatAttributes().withLabel ("dB")));
 
-        // Ratio: 1:1 (no compression) to 20:1, per-band default.
+        // Ratio: 0.2:1 (upward, v0.3.0) through 1:1 (no processing) to 20:1
+        // (downward), per-band default. Skewed so 1:1 - the exact
+        // boundary between upward and downward processing - sits at the
+        // knob's centre travel position rather than being crowded toward
+        // one end. See ratioMin's own doc comment above for the sourced
+        // lower bound.
+        auto ratioRange = juce::NormalisableRange<float> (ratioMin, ratioMax, 0.01f);
+        ratioRange.setSkewForCentre (1.0f);
+
         layout.add (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { ratioId, 1 },
             labelPrefix + " Ratio",
-            juce::NormalisableRange<float> (1.0f, 20.0f, 0.01f),
+            ratioRange,
             ratioDefault,
             juce::AudioParameterFloatAttributes().withLabel (":1")));
 
@@ -109,6 +127,217 @@ namespace
 
         layout.add (std::make_unique<juce::AudioParameterBool> (
             juce::ParameterID { soloId, 1 }, labelPrefix + " Solo", false));
+    }
+
+    // Range (v0.3.0 / docs/design-brief-v3-dynamics.md): a band's maximum
+    // gain-change clamp, off by default so adding these parameters never
+    // changes existing (v0.2.0) default behaviour - see
+    // src/dsp/KneeGainComputer.h/BandCompressor.h. The 0-30 dB range and its
+    // 12 dB "if you turn it on" default are a reasoned engineering choice
+    // (the reference class - FabFilter Pro-MB's Range knob, Waves C6's Range
+    // paradigm - documents the *concept* of a maximum-gain-change clamp but
+    // not a specific numeric range; see docs/research-notes.md's v0.3.0
+    // addendum), not sourced to a specific manual number.
+    void addRangeParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout,
+                              const char* rangeEnabledId,
+                              const char* rangeId,
+                              const juce::String& labelPrefix)
+    {
+        layout.add (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { rangeEnabledId, 1 }, labelPrefix + " Range Enabled", false));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { rangeId, 1 },
+            labelPrefix + " Range",
+            juce::NormalisableRange<float> (0.0f, 30.0f, 0.01f),
+            12.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("dB")));
+    }
+
+    // Downward expansion / gating (v0.4.0 / GitHub issue #25): an
+    // independent noise-gate/expander stage per band, off by default so
+    // adding these parameters never changes existing default behaviour. See
+    // src/dsp/GateGainComputer.h for the transfer-curve math this drives.
+    //
+    // Threshold: -80 to 0 dB, deeper than the compressor's own -60 to 0 dB
+    // range - a gate threshold is meant to sit "well below the compressor's
+    // own Threshold" (issue #25), so it needs headroom to reach further into
+    // the noise floor. Per-band defaults sit comfortably below each band's
+    // own compressor Threshold default (Low -24, Mid -30, High -20 dB - see
+    // addBandParameters() above).
+    //
+    // Ratio: 1:1 (bypass) to 100:1 (a near-hard gate) - deliberately not the
+    // compressor's own 0.2-20 range (there is no "upward" side for a gate),
+    // with a centre-skew around 4:1 so gentler, more common expansion
+    // ratios get proportionally more knob travel than the hard-gate extreme.
+    // Default 2:1 on every band: a gentle, musically conservative downward
+    // expander that reduces bleed/noise without the audible pumping a much
+    // steeper ratio risks - no sourced per-band difference found for this
+    // (mirroring Knee/Makeup's uniform-default reasoning above).
+    //
+    // Attack: 0.1-50 ms - tighter than the compressor's own 0.1-100 ms
+    // ceiling, since a gate's attack is conventionally much faster than a
+    // compressor's (Zolzer's DAFX gate/expander treatment). Release:
+    // 10-2000 ms - a wider ceiling than the compressor's own 1000 ms, since
+    // a gate's release commonly needs to be slow to avoid audible chatter
+    // when the input hovers near the threshold. Per-band Attack/Release
+    // defaults follow the same ordering invariant as the compressor's own
+    // (lowGateAttack > midGateAttack > highGateAttack; lowGateRelease >
+    // midGateRelease > highGateRelease - see tests/VoicingGuaranteesTests.cpp).
+    void addGateParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout,
+                             const char* gateEnabledId,
+                             const char* gateThresholdId,
+                             const char* gateRatioId,
+                             const char* gateAttackId,
+                             const char* gateReleaseId,
+                             const juce::String& labelPrefix,
+                             float gateThresholdDefaultDb,
+                             float gateAttackDefaultMs,
+                             float gateReleaseDefaultMs)
+    {
+        layout.add (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { gateEnabledId, 1 }, labelPrefix + " Gate Enabled", false));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { gateThresholdId, 1 },
+            labelPrefix + " Gate Threshold",
+            juce::NormalisableRange<float> (-80.0f, 0.0f, 0.01f),
+            gateThresholdDefaultDb,
+            juce::AudioParameterFloatAttributes().withLabel ("dB")));
+
+        auto gateRatioRange = juce::NormalisableRange<float> (1.0f, 100.0f, 0.01f);
+        gateRatioRange.setSkewForCentre (4.0f);
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { gateRatioId, 1 },
+            labelPrefix + " Gate Ratio",
+            gateRatioRange,
+            2.0f,
+            juce::AudioParameterFloatAttributes().withLabel (":1")));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { gateAttackId, 1 },
+            labelPrefix + " Gate Attack",
+            makeLogRange (0.1f, 50.0f),
+            gateAttackDefaultMs,
+            juce::AudioParameterFloatAttributes().withLabel ("ms")));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { gateReleaseId, 1 },
+            labelPrefix + " Gate Release",
+            makeLogRange (10.0f, 2000.0f),
+            gateReleaseDefaultMs,
+            juce::AudioParameterFloatAttributes().withLabel ("ms")));
+    }
+
+    // Per-band Mid/Side processing (v0.4.0 / GitHub issue #24): off by
+    // default so adding these parameters never changes existing default
+    // behaviour. Side Threshold/Ratio share the same ranges as the band's
+    // own main Threshold/Ratio (see addBandParameters() above) for
+    // consistency, with Side Ratio defaulting to 1:1 (bit-exact bypass) -
+    // so simply enabling M/S with no further tweaking compresses only the
+    // Mid (centre) component using the band's existing Threshold/Ratio,
+    // leaving Side untouched, a musically sensible starting point (tighten
+    // the centre without touching stereo width) rather than an arbitrary
+    // doubled default. Side Threshold defaults to the same value as the
+    // band's own main Threshold default, so a user who *does* raise Side
+    // Ratio above 1:1 starts from a coherent operating point.
+    void addMidSideParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout,
+                                const char* midSideEnabledId,
+                                const char* sideThresholdId,
+                                const char* sideRatioId,
+                                const juce::String& labelPrefix,
+                                float sideThresholdDefaultDb)
+    {
+        layout.add (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { midSideEnabledId, 1 }, labelPrefix + " M/S Enabled", false));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { sideThresholdId, 1 },
+            labelPrefix + " Side Threshold",
+            juce::NormalisableRange<float> (-60.0f, 0.0f, 0.01f),
+            sideThresholdDefaultDb,
+            juce::AudioParameterFloatAttributes().withLabel ("dB")));
+
+        auto sideRatioRange = juce::NormalisableRange<float> (ratioMin, ratioMax, 0.01f);
+        sideRatioRange.setSkewForCentre (1.0f);
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { sideRatioId, 1 },
+            labelPrefix + " Side Ratio",
+            sideRatioRange,
+            1.0f,
+            juce::AudioParameterFloatAttributes().withLabel (":1")));
+    }
+
+    // Detector v2 + gate shaping (v0.5.0): the six per-band parameters added
+    // by the "Flagship Dynamics Core" release. Factored for readability only -
+    // unlike every helper above, this one is CALLED after all fifty-nine
+    // existing declarations, and every parameter it adds carries versionHint 2
+    // (see ParameterIds.h's v0.5.0 block for both binding rules).
+    //
+    // All six defaults are neutral: Peak detection, auto release off, Clean
+    // character, no stereo link, no gate hold, no gate hysteresis - i.e.
+    // exactly the v0.4.0 band.
+    void addDetectorParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout,
+                                 const char* detectorModeId,
+                                 const char* autoReleaseId,
+                                 const char* characterId,
+                                 const char* stereoLinkId,
+                                 const char* gateHoldId,
+                                 const char* gateHysteresisId,
+                                 const juce::String& labelPrefix)
+    {
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { detectorModeId, 2 },
+            labelPrefix + " Detector",
+            juce::StringArray { "Peak", "RMS" },
+            0));
+
+        layout.add (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { autoReleaseId, 2 }, labelPrefix + " Auto Release", false));
+
+        // "VCA" is a generic circuit-class descriptor, the same convention as
+        // the already-shipped "FET Limiter" naming - no hardware brand names
+        // appear in any parameter name, UI string or preset name (the sourced
+        // circuit references live in docs/research-notes.md only).
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { characterId, 2 },
+            labelPrefix + " Character",
+            juce::StringArray { "Clean", "VCA" },
+            0));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { stereoLinkId, 2 },
+            labelPrefix + " Stereo Link",
+            juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f),
+            0.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("%")));
+
+        // Gate Hold: 0-500 ms. Deliberately a centre-skewed range rather than
+        // makeLogRange(): a true base-10 log mapping is undefined at the 0 ms
+        // endpoint that neutrality requires, so the taper is approximated with
+        // setSkewForCentre() instead, which reaches 0 exactly while still
+        // spending most of the travel on the short, musically useful holds.
+        auto gateHoldRange = juce::NormalisableRange<float> (0.0f, 500.0f, 0.01f);
+        gateHoldRange.setSkewForCentre (50.0f);
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { gateHoldId, 2 },
+            labelPrefix + " Gate Hold",
+            gateHoldRange,
+            0.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("ms")));
+
+        // Gate Hysteresis: 0-12 dB of separation between the opening and
+        // closing thresholds. It has to exceed the detector's own worst-case
+        // ripple to actually kill chatter; 3-6 dB is the useful region.
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { gateHysteresisId, 2 },
+            labelPrefix + " Gate Hysteresis",
+            juce::NormalisableRange<float> (0.0f, 12.0f, 0.01f),
+            0.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("dB")));
     }
 }
 
@@ -169,6 +398,19 @@ namespace trpt
                             -20.0f, 2.0f, 5.0f, 55.0f);
 
         //======================================================================
+        // Range (v0.3.0). See addRangeParameters()'s doc comment above.
+        addRangeParameters (layout, ParamIDs::lowRangeEnabled, ParamIDs::lowRange, "Low");
+        addRangeParameters (layout, ParamIDs::midRangeEnabled, ParamIDs::midRange, "Mid");
+        addRangeParameters (layout, ParamIDs::highRangeEnabled, ParamIDs::highRange, "High");
+
+        //======================================================================
+        // Per-band Mid/Side processing (v0.4.0 / issue #24). See
+        // addMidSideParameters()'s doc comment above.
+        addMidSideParameters (layout, ParamIDs::lowMidSideEnabled, ParamIDs::lowSideThreshold, ParamIDs::lowSideRatio, "Low", -24.0f);
+        addMidSideParameters (layout, ParamIDs::midMidSideEnabled, ParamIDs::midSideThreshold, ParamIDs::midSideRatio, "Mid", -30.0f);
+        addMidSideParameters (layout, ParamIDs::highMidSideEnabled, ParamIDs::highSideThreshold, ParamIDs::highSideRatio, "High", -20.0f);
+
+        //======================================================================
         // Per-band Mute/Solo (M1). See ParameterIds.h for the console-style
         // semantics (Mute always wins; Solo isolates unmuted soloed bands).
         addMuteSoloParameters (layout, ParamIDs::lowMute, ParamIDs::lowSolo, "Low");
@@ -190,6 +432,24 @@ namespace trpt
             juce::AudioParameterFloatAttributes().withLabel ("dB")));
 
         //======================================================================
+        // Downward expansion / gating (v0.4.0 / issue #25). See
+        // addGateParameters()'s doc comment above.
+        addGateParameters (layout,
+                            ParamIDs::lowGateEnabled, ParamIDs::lowGateThreshold, ParamIDs::lowGateRatio, ParamIDs::lowGateAttack, ParamIDs::lowGateRelease,
+                            "Low",
+                            -50.0f, 10.0f, 200.0f);
+
+        addGateParameters (layout,
+                            ParamIDs::midGateEnabled, ParamIDs::midGateThreshold, ParamIDs::midGateRatio, ParamIDs::midGateAttack, ParamIDs::midGateRelease,
+                            "Mid",
+                            -55.0f, 5.0f, 150.0f);
+
+        addGateParameters (layout,
+                            ParamIDs::highGateEnabled, ParamIDs::highGateThreshold, ParamIDs::highGateRatio, ParamIDs::highGateAttack, ParamIDs::highGateRelease,
+                            "High",
+                            -45.0f, 2.0f, 100.0f);
+
+        //======================================================================
         // Output: master trim after the three bands are summed, -24 to +24 dB.
         layout.add (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { ParamIDs::output, 1 },
@@ -197,6 +457,75 @@ namespace trpt
             juce::NormalisableRange<float> (-24.0f, 24.0f, 0.01f),
             0.0f,
             juce::AudioParameterFloatAttributes().withLabel ("dB")));
+
+        //======================================================================
+        // v0.5.0 "Flagship Dynamics Core": the twenty-three new parameters,
+        // appended here as ONE block after every declaration above and all
+        // carrying versionHint 2. Both rules are binding and asserted by
+        // tests/ParameterTests.cpp (T22) - see ParameterIds.h for why
+        // interleaving them into the per-band helpers above (house style
+        // everywhere else in this file) would break v0.4.0 AU session
+        // automation. Every default below is neutral.
+
+        // External sidechain (issue #1, part 1).
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { ParamIDs::scSource, 2 },
+            "Sidechain Source",
+            juce::StringArray { "Internal", "External" },
+            0));
+
+        // Detector-key monitoring, not band solo: this replaces the output
+        // with the selected band's key signal so the user can hear exactly
+        // what the detectors are following.
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { ParamIDs::scListen, 2 },
+            "Sidechain Listen",
+            juce::StringArray { "Off", "Low", "Mid", "High" },
+            0));
+
+        // Selectable crossover slopes (issue #1, part 2). Index 1 (24 dB/oct,
+        // LR4) is the default and the v0.1-v0.4 path.
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { ParamIDs::crossoverSlope, 2 },
+            "Crossover Slope",
+            juce::StringArray { "12 dB/oct", "24 dB/oct", "48 dB/oct" },
+            1));
+
+        // Lookahead. Discrete rather than continuous because every change
+        // re-reports latency to the host, which is a message-thread,
+        // PDC-invalidating event - industry-normal, but not something to do
+        // on a continuous automation lane.
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { ParamIDs::lookahead, 2 },
+            "Lookahead",
+            juce::StringArray { "Off", "1.5 ms", "3 ms", "5 ms" },
+            0));
+
+        // Global dry/wet mix, wet-latency compensated. 100% is fully wet -
+        // the v0.4.0 behaviour, and structurally bypassed at that value so the
+        // default path stays bit-identical (a "+ 0.0f" add can flip -0.0
+        // signs, so neutrality here is structural, not arithmetic).
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { ParamIDs::mix, 2 },
+            "Mix",
+            juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f),
+            100.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("%")));
+
+        addDetectorParameters (layout,
+                                ParamIDs::lowDetectorMode, ParamIDs::lowAutoRelease, ParamIDs::lowCharacter,
+                                ParamIDs::lowStereoLink, ParamIDs::lowGateHold, ParamIDs::lowGateHysteresis,
+                                "Low");
+
+        addDetectorParameters (layout,
+                                ParamIDs::midDetectorMode, ParamIDs::midAutoRelease, ParamIDs::midCharacter,
+                                ParamIDs::midStereoLink, ParamIDs::midGateHold, ParamIDs::midGateHysteresis,
+                                "Mid");
+
+        addDetectorParameters (layout,
+                                ParamIDs::highDetectorMode, ParamIDs::highAutoRelease, ParamIDs::highCharacter,
+                                ParamIDs::highStereoLink, ParamIDs::highGateHold, ParamIDs::highGateHysteresis,
+                                "High");
 
         return layout;
     }

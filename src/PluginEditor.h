@@ -4,6 +4,8 @@
 
 #include "presets/PresetBar.h"
 
+#include "dsp/GainReductionMeter.h"
+
 class TriptychAudioProcessor;
 
 // A simple, functional v0.1/v0.2 editor: one rotary slider per parameter,
@@ -14,7 +16,8 @@ class TriptychAudioProcessor;
 // High column additionally carries the M1 high-band limiter option (an
 // enable toggle + threshold knob). A custom vector-drawn GUI is a later
 // milestone; this is deliberately plain but fully wired and usable.
-class TriptychAudioProcessorEditor final : public juce::AudioProcessorEditor
+class TriptychAudioProcessorEditor final : public juce::AudioProcessorEditor,
+                                            private juce::Timer
 {
 public:
     explicit TriptychAudioProcessorEditor (TriptychAudioProcessor& processorToEdit);
@@ -25,6 +28,7 @@ public:
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     struct Knob
     {
@@ -39,8 +43,30 @@ private:
         std::unique_ptr<ButtonAttachment> attachment;
     };
 
+    // JUCE 8.0.14 gotcha: ComboBoxAttachment does NOT populate the box's
+    // items - it only syncs the selected index. configureChoice() below fills
+    // them from the parameter's own choice list before attaching.
+    struct Choice
+    {
+        juce::ComboBox box;
+        juce::Label label;
+        std::unique_ptr<ComboBoxAttachment> attachment;
+    };
+
+    // A thin vertical gain-reduction bar, one per band column (v0.5.0). Reads
+    // the processor's relaxed GR atomics on a 30 Hz timer; peak-hold decay is
+    // handled here rather than on the audio thread.
+    struct GainReductionBar final : public juce::Component
+    {
+        void paint (juce::Graphics& g) override;
+
+        float currentDb = 0.0f;
+        float heldDb = 0.0f;
+    };
+
     // One band's Mute/Solo pair plus its six compression knobs (Knee added
-    // in v0.2.0), in signal-flow order.
+    // in v0.2.0) and Range enable/amount (added in v0.3.0), in signal-flow
+    // order.
     struct BandControls
     {
         Toggle mute;
@@ -51,11 +77,41 @@ private:
         Knob attack;
         Knob release;
         Knob makeup;
+        Toggle rangeEnabled;
+        Knob range;
+        Toggle gateEnabled;
+        Knob gateThreshold;
+        Knob gateRatio;
+        Knob gateAttack;
+        Knob gateRelease;
+        Toggle midSideEnabled;
+        Knob sideThreshold;
+        Knob sideRatio;
+
+        // v0.5.0 detector + gate-shaping controls.
+        Choice detectorMode;
+        Toggle autoRelease;
+        Choice character;
+        Knob stereoLink;
+        Knob gateHold;
+        Knob gateHysteresis;
+
+        GainReductionBar gainReductionBar;
     };
 
     void configureKnob (Knob& knob, const juce::String& parameterId, const juce::String& labelText);
     void configureToggle (Toggle& toggle, const juce::String& parameterId, const juce::String& labelText);
+    void configureChoice (Choice& choice, const juce::String& parameterId, const juce::String& labelText);
     void configureBandLabel (juce::Label& label, const juce::String& text);
+    void configureBandExtras (BandControls& controls,
+                               const juce::String& detectorModeId,
+                               const juce::String& autoReleaseId,
+                               const juce::String& characterId,
+                               const juce::String& stereoLinkId,
+                               const juce::String& gateHoldId,
+                               const juce::String& gateHysteresisId);
+
+    void timerCallback() override;
 
     TriptychAudioProcessor& audioProcessor;
 
@@ -82,6 +138,13 @@ private:
     // High-band limiter option (M1) - High column only.
     Toggle highLimiterEnabledToggle;
     Knob highLimiterThresholdKnob;
+
+    // v0.5.0 global controls, added to the top strip.
+    Choice sidechainSourceChoice;
+    Choice sidechainListenChoice;
+    Choice crossoverSlopeChoice;
+    Choice lookaheadChoice;
+    Knob mixKnob;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TriptychAudioProcessorEditor)
 };

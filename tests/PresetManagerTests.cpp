@@ -1,3 +1,4 @@
+#include "TestHelpers.h"
 #include "PluginProcessor.h"
 #include "params/ParameterIds.h"
 #include "presets/PresetManager.h"
@@ -38,6 +39,7 @@ namespace
             { BinaryData::masteringSafetyCeiling_json, BinaryData::masteringSafetyCeiling_jsonSize },
             { BinaryData::parallelStyleDensity_json, BinaryData::parallelStyleDensity_jsonSize },
             { BinaryData::hardLimiterCeiling_json, BinaryData::hardLimiterCeiling_jsonSize },
+            { BinaryData::glueMaster_json, BinaryData::glueMaster_jsonSize }, // v0.5.0
         };
     }
 
@@ -265,7 +267,7 @@ TEST_CASE ("PresetManager: every factory preset parses and loads without error",
     const auto all = manager.getAllPresets();
     const auto factoryCount = std::count_if (all.begin(), all.end(), [] (auto& e) { return e.isFactory; });
 
-    REQUIRE (factoryCount == 8); // docs/presets.md's Factory Presets section
+    REQUIRE (factoryCount == 9); // docs/presets.md's Factory Presets section (Glue Master added in v0.5.0)
 
     for (auto& entry : all)
     {
@@ -302,6 +304,7 @@ TEST_CASE ("PresetManager: factory preset content is plausible (Default is Init 
     static constexpr const char* thresholdIds[] = { ParamIDs::lowThreshold, ParamIDs::midThreshold, ParamIDs::highThreshold };
     static constexpr const char* ratioIds[] = { ParamIDs::lowRatio, ParamIDs::midRatio, ParamIDs::highRatio };
     static constexpr const char* kneeIds[] = { ParamIDs::lowKnee, ParamIDs::midKnee, ParamIDs::highKnee };
+    static constexpr const char* rangeIds[] = { ParamIDs::lowRange, ParamIDs::midRange, ParamIDs::highRange };
 
     for (auto& entry : all)
     {
@@ -319,7 +322,9 @@ TEST_CASE ("PresetManager: factory preset content is plausible (Default is Init 
 
         for (const auto* id : ratioIds)
         {
-            CHECK (getParam (processor, id) >= 1.0f);
+            // v0.3.0: lower bound widened to 0.2 (upward) - see
+            // docs/design-brief-v3-dynamics.md.
+            CHECK (getParam (processor, id) >= 0.2f);
             CHECK (getParam (processor, id) <= 20.0f);
         }
 
@@ -327,6 +332,12 @@ TEST_CASE ("PresetManager: factory preset content is plausible (Default is Init 
         {
             CHECK (getParam (processor, id) >= 0.0f);
             CHECK (getParam (processor, id) <= 100.0f);
+        }
+
+        for (const auto* id : rangeIds)
+        {
+            CHECK (getParam (processor, id) >= 0.0f);
+            CHECK (getParam (processor, id) <= 30.0f);
         }
 
         CHECK (getParam (processor, ParamIDs::output) >= -24.0f);
@@ -595,4 +606,131 @@ TEST_CASE ("PresetManager: parameter-driven dirty tracking coexists safely with 
     }
 
     CHECK (manager.isDirty());
+}
+
+//==============================================================================
+// v0.5.0 factory-preset contract (brief section 4.3).
+
+// Every factory preset carries all twenty-three new keys, and every one of the
+// six presets that were NOT deliberately revoiced carries them at their neutral
+// defaults - so those six sound exactly as they did in v0.4.0.
+TEST_CASE ("PresetManager: v0.5.0 keys are present everywhere and neutral outside the two revoiced presets", "[presets][regression]")
+{
+    TriptychAudioProcessor processor;
+    processor.prepareToPlay (48000.0, 512);
+
+    ScopedTestDirectory scratch;
+    PresetManager manager (processor.apvts, makeIsolatedConfig (scratch.dir), makeTestFactoryPresetAssets());
+
+    // The two presets the release deliberately revoices, plus the new one.
+    static const juce::StringArray revoiced { "Mastering Safety Ceiling", "Density Glue", "Glue Master" };
+
+    struct NeutralExpectation
+    {
+        const char* id;
+        float value;
+    };
+
+    static const std::vector<NeutralExpectation> neutrals {
+        { ParamIDs::scSource, 0.0f }, { ParamIDs::scListen, 0.0f },
+        { ParamIDs::crossoverSlope, 1.0f }, { ParamIDs::lookahead, 0.0f }, { ParamIDs::mix, 100.0f },
+        { ParamIDs::lowDetectorMode, 0.0f }, { ParamIDs::lowAutoRelease, 0.0f }, { ParamIDs::lowCharacter, 0.0f },
+        { ParamIDs::lowStereoLink, 0.0f }, { ParamIDs::lowGateHold, 0.0f }, { ParamIDs::lowGateHysteresis, 0.0f },
+        { ParamIDs::midDetectorMode, 0.0f }, { ParamIDs::midAutoRelease, 0.0f }, { ParamIDs::midCharacter, 0.0f },
+        { ParamIDs::midStereoLink, 0.0f }, { ParamIDs::midGateHold, 0.0f }, { ParamIDs::midGateHysteresis, 0.0f },
+        { ParamIDs::highDetectorMode, 0.0f }, { ParamIDs::highAutoRelease, 0.0f }, { ParamIDs::highCharacter, 0.0f },
+        { ParamIDs::highStereoLink, 0.0f }, { ParamIDs::highGateHold, 0.0f }, { ParamIDs::highGateHysteresis, 0.0f }
+    };
+
+    REQUIRE (neutrals.size() == 23);
+
+    for (auto& entry : manager.getAllPresets())
+    {
+        if (! entry.isFactory || revoiced.contains (entry.name))
+            continue;
+
+        CAPTURE (entry.name);
+        REQUIRE (manager.loadPreset (entry.name));
+
+        for (const auto& neutral : neutrals)
+        {
+            auto* parameter = processor.apvts.getParameter (neutral.id);
+            REQUIRE (parameter != nullptr);
+
+            CAPTURE (neutral.id);
+            CHECK (parameter->convertFrom0to1 (parameter->getValue()) == Catch::Approx (neutral.value).margin (1e-3));
+        }
+    }
+}
+
+// The two deliberate revoicings and the new preset actually do what
+// docs/presets.md says they do.
+TEST_CASE ("PresetManager: the v0.5.0 revoiced presets engage the features they advertise", "[presets]")
+{
+    TriptychAudioProcessor processor;
+    processor.prepareToPlay (48000.0, 512);
+
+    ScopedTestDirectory scratch;
+    PresetManager manager (processor.apvts, makeIsolatedConfig (scratch.dir), makeTestFactoryPresetAssets());
+
+    const auto plainValue = [&] (const char* id)
+    {
+        auto* parameter = processor.apvts.getParameter (id);
+        REQUIRE (parameter != nullptr);
+        return parameter->convertFrom0to1 (parameter->getValue());
+    };
+
+    SECTION ("Mastering Safety Ceiling: lookahead, the brickwall, full link and RMS detection")
+    {
+        REQUIRE (manager.loadPreset ("Mastering Safety Ceiling"));
+
+        CHECK (plainValue (ParamIDs::lookahead) == Catch::Approx (1.0f).margin (1e-3));   // 1.5 ms
+        CHECK (plainValue (ParamIDs::highLimiterEnabled) > 0.5f);
+
+        for (const auto* id : { ParamIDs::lowStereoLink, ParamIDs::midStereoLink, ParamIDs::highStereoLink })
+            CHECK (plainValue (id) == Catch::Approx (100.0f).margin (1e-3));
+
+        for (const auto* id : { ParamIDs::lowDetectorMode, ParamIDs::midDetectorMode, ParamIDs::highDetectorMode })
+            CHECK (plainValue (id) == Catch::Approx (1.0f).margin (1e-3));                // RMS
+    }
+
+    SECTION ("Density Glue: VCA character, auto release, 80% link")
+    {
+        REQUIRE (manager.loadPreset ("Density Glue"));
+
+        for (const auto* id : { ParamIDs::lowCharacter, ParamIDs::midCharacter, ParamIDs::highCharacter })
+            CHECK (plainValue (id) == Catch::Approx (1.0f).margin (1e-3));                // VCA
+
+        for (const auto* id : { ParamIDs::lowAutoRelease, ParamIDs::midAutoRelease, ParamIDs::highAutoRelease })
+            CHECK (plainValue (id) > 0.5f);
+
+        for (const auto* id : { ParamIDs::lowStereoLink, ParamIDs::midStereoLink, ParamIDs::highStereoLink })
+            CHECK (plainValue (id) == Catch::Approx (80.0f).margin (1e-3));
+    }
+
+    SECTION ("Glue Master: everything new, tastefully")
+    {
+        REQUIRE (manager.loadPreset ("Glue Master"));
+
+        CHECK (manager.isCurrentPresetFactory());
+        CHECK (plainValue (ParamIDs::mix) == Catch::Approx (90.0f).margin (1e-3));
+        CHECK (plainValue (ParamIDs::lookahead) == Catch::Approx (1.0f).margin (1e-3));
+
+        for (const auto* id : { ParamIDs::lowCharacter, ParamIDs::midCharacter, ParamIDs::highCharacter })
+            CHECK (plainValue (id) == Catch::Approx (1.0f).margin (1e-3));
+
+        for (const auto* id : { ParamIDs::lowDetectorMode, ParamIDs::midDetectorMode, ParamIDs::highDetectorMode })
+            CHECK (plainValue (id) == Catch::Approx (1.0f).margin (1e-3));
+
+        for (const auto* id : { ParamIDs::lowStereoLink, ParamIDs::midStereoLink, ParamIDs::highStereoLink })
+            CHECK (plainValue (id) == Catch::Approx (100.0f).margin (1e-3));
+
+        // It renders, and it renders finite.
+        juce::AudioBuffer<float> buffer (2, 512);
+        TestHelpers::fillWithSine (buffer, 48000.0, 440.0, 0.6f);
+        juce::MidiBuffer midi;
+
+        CHECK_NOTHROW (processor.processBlock (buffer, midi));
+        CHECK (TestHelpers::allSamplesFinite (buffer));
+    }
 }

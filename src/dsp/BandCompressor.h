@@ -2,6 +2,12 @@
 
 #include <juce_dsp/juce_dsp.h>
 
+#include <vector>
+
+#include "Detector.h"
+#include "GainReductionMeter.h"
+#include "Lookahead.h"
+
 // One compression band: threshold/ratio/knee feed-forward VCA compression
 // (a from-scratch gain computer, see src/dsp/KneeGainComputer.h, driven by
 // juce::dsp::BallisticsFilter's peak envelope follower) followed by a
@@ -29,18 +35,27 @@
 // follower's own behaviour at all.
 //
 // Bypass identity: with ratio == 1.0, KneeGainComputer::computeGainLinear()
-// returns 1.0 unconditionally (independent of threshold/envelope/knee) - see
-// KneeGainComputer.h/.cpp. Combined with makeup == 0 dB (unity Gain),
+// returns 1.0 unconditionally (independent of threshold/envelope/knee/range)
+// - see KneeGainComputer.h/.cpp. Combined with makeup == 0 dB (unity Gain),
 // setRatio(1.0f) + setMakeupDb(0.0f) makes a band a true identity
-// pass-through regardless of Knee, which is what TriptychEngine's flat-sum
-// null test relies on (tests/EngineTests.cpp).
+// pass-through regardless of Knee/Range, which is what TriptychEngine's
+// flat-sum null test relies on (tests/EngineTests.cpp).
 //
-// Knee null test (docs/design-brief.md guarantee #1): at Knee == 0%,
-// KneeGainComputer::computeGainLinear() takes a dedicated linear-domain fast
-// path that reproduces juce::dsp::Compressor::processSample()'s exact
-// hard-knee formula bit-for-bit (see KneeGainComputer.h/.cpp) - the v0.1
-// bypass-identity and gain-reduction tests are preserved unchanged at that
-// extreme (tests/BandCompressorTests.cpp).
+// Knee null test (docs/design-brief.md guarantee #1): at Knee == 0% and
+// Range disabled, KneeGainComputer::computeGainLinear() takes a dedicated
+// linear-domain fast path that reproduces juce::dsp::Compressor::
+// processSample()'s exact hard-knee formula bit-for-bit (see
+// KneeGainComputer.h/.cpp) - the v0.1 bypass-identity and gain-reduction
+// tests are preserved unchanged at that extreme (tests/BandCompressorTests.cpp).
+//
+// v0.3.0 hybrid dynamics (docs/design-brief-v3-dynamics.md): Ratio now
+// spans 0.2:1-20:1 (previously 1:1-20:1) - values below 1:1 are upward
+// compression/expansion (signal above threshold is boosted, not cut),
+// continuously tapering through ratio == 1.0's exact null point (still a
+// bit-exact bypass, unaffected by this range extension). An optional
+// per-band Range clamp (`setRangeEnabled`/`setRangeDb`) limits the maximum
+// gain change in either direction; disabled by default so a band with
+// Range never touched behaves identically to v0.2.0.
 class BandCompressor
 {
 public:
@@ -56,7 +71,18 @@ public:
 
     // Processes `block` in place. Real-time safe: no allocation once
     // prepare() has completed. A zero-sample block is a safe no-op.
-    void process (juce::dsp::AudioBlock<float>& block) noexcept;
+    //
+    // `externalKey` (v0.5.0): an optional band-matched sidechain key the
+    // detectors should follow instead of the band's own audio. Must have the
+    // same sample count as `block`; nullptr (the default) keys the band
+    // internally, exactly as v0.4.0 did.
+    //
+    // `meter` (v0.5.0): an optional per-band gain-reduction tap, written once
+    // per call with the deepest compressor/gate reduction reached in the
+    // block. nullptr disables the tap entirely.
+    void process (juce::dsp::AudioBlock<float>& block,
+                  const juce::dsp::AudioBlock<const float>* externalKey = nullptr,
+                  trpt::BandGainReduction* meter = nullptr) noexcept;
 
     void setThresholdDb (float newThresholdDb);
     void setRatio (float newRatio);
@@ -64,6 +90,15 @@ public:
     void setAttackMs (float newAttackMs);
     void setReleaseMs (float newReleaseMs);
     void setMakeupDb (float newMakeupDb);
+
+    // Range (v0.3.0): an optional maximum gain-change clamp in dB, applied
+    // to both downward (cut) and upward (boost) processing - see
+    // KneeGainComputer.h. Off by default (the smoothed target starts at
+    // KneeGainComputer's unlimitedRangeDb sentinel), so a band whose Range
+    // API is never called at all reproduces v0.2.0's unclamped behaviour
+    // exactly.
+    void setRangeEnabled (bool shouldBeEnabled) noexcept;
+    void setRangeDb (float newRangeDb);
 
     // Optional post-stage brickwall limiter (M1's "high-band limiter
     // option"; the type is generic so any band could opt in, though only
@@ -90,6 +125,91 @@ public:
     void setLimiterEnabled (bool shouldBeEnabled) noexcept { limiterEnabled = shouldBeEnabled; }
     void setLimiterThresholdDb (float newThresholdDb);
 
+    // Downward expansion / gating (v0.4.0, issue #25): an independent,
+    // per-band noise-gate/expander stage with its own threshold/ratio/
+    // attack/release - see src/dsp/GateGainComputer.h for the pure transfer-
+    // curve math. Reuses the exact same detector topology as the compressor
+    // above rather than a second, structurally different detection method:
+    // a second juce::dsp::BallisticsFilter instance (gateEnvelopeFilter),
+    // with its own independently configurable attack/release (issue #25
+    // explicitly asks that gate ballistics not just reuse the compressor's
+    // own Attack/Release, since gates typically want a much faster attack
+    // and a slower, chatter-avoiding release than the compressor sitting in
+    // the same band). Applied as an additional multiplicative gain alongside
+    // the compressor's own VCA gain, keyed off the *same pre-compression
+    // input sample* the compressor's own envelope follower sees - so gating
+    // a band is never masked by (or interacting with) that band's own
+    // compression curve.
+    //
+    // Off by default: setGateEnabled(false) (the constructed default)
+    // smooths gateRatioSmoothed's target to 1.0 - GateGainComputer's own
+    // bit-exact bypass value, mirroring Range's "smooth to the bypass
+    // sentinel while disabled" idiom (see setRangeEnabled() above) rather
+    // than gating a separate boolean multiplier - so a band whose Gate API
+    // is never touched at all reproduces pre-v0.4.0 behaviour exactly.
+    void setGateEnabled (bool shouldBeEnabled) noexcept;
+    void setGateThresholdDb (float newThresholdDb);
+    void setGateRatio (float newRatio);
+    void setGateAttackMs (float newAttackMs);
+    void setGateReleaseMs (float newReleaseMs);
+
+    // Per-band Mid/Side processing (v0.4.0, issue #24): encodes the band's
+    // stereo signal to Mid/Side (src/dsp/MidSideCodec.h's equal-power,
+    // exactly-invertible transform) immediately before the per-sample
+    // gain-computation loop and decodes back immediately after it, so
+    // makeup gain/the optional limiter always run on genuine L/R. The
+    // band's main Threshold/Ratio/Knee/Attack/Release/Range above continue
+    // to drive the Mid component (matching pre-v0.4.0 stereo-linked
+    // behaviour exactly when M/S is disabled); Side gets its own
+    // independent Threshold/Ratio (issue #24's documented "at minimum"
+    // scope), sharing the band's Knee/Attack/Release/Range - a deliberate
+    // scope decision to keep the per-band parameter surface bounded rather
+    // than doubling every control. Off by default and a defensive no-op on
+    // any bus that isn't exactly 2 channels (see process()'s definition),
+    // so existing sessions/presets and mono buses are entirely unaffected.
+    //
+    // Note: unlike Range/the limiter above, toggling M/S itself is a
+    // structural change of basis (L/R vs Mid/Side), not a smoothly
+    // rampable scalar gain - unless both Mid and Side happen to be
+    // completely bypassed (ratio == 1.0 on both) at the instant of the
+    // toggle, switching mid-playback can produce an audible discontinuity,
+    // the same caveat every M/S-capable console/plugin carries. Threshold/
+    // Ratio changes *within* a fixed M/S mode remain fully smoothed, as
+    // usual.
+    void setMidSideEnabled (bool shouldBeEnabled) noexcept;
+    void setSideThresholdDb (float newThresholdDb);
+    void setSideRatio (float newRatio);
+
+    //==========================================================================
+    // v0.5.0 additions. Every one of them is neutral at its default, so a
+    // band whose new API is never touched reproduces v0.4.0 bit for bit (see
+    // Detector.h for the structural - not merely numerical - basis of that
+    // guarantee).
+
+    // Detector v2 (brief section 3.1-3.3).
+    void setDetectorLaw (Detector::Law newLaw) noexcept { detector.setLaw (newLaw); }
+    void setDetectorCharacter (Detector::Character newCharacter) noexcept { detector.setCharacter (newCharacter); }
+    void setAutoReleaseEnabled (bool shouldBeEnabled) noexcept { detector.setAutoReleaseEnabled (shouldBeEnabled); }
+    void setStereoLinkPercent (float newPercent) noexcept { detector.setStereoLinkPercent (newPercent); }
+
+    // Lookahead (brief section 3.4): the band's audio is delayed by this many
+    // samples while the detectors keep reading the undelayed key, so every
+    // envelope leads the audio it acts on. 0 (the default) bypasses the delay
+    // line structurally.
+    //
+    // When the optional limiter is ALSO enabled, the same delay is instead
+    // spent inside the lookahead brickwall (see setLimiterEnabled below), so
+    // the band's total latency is this value either way - a single global L
+    // is what the host is told and what every band actually adds.
+    void setLookaheadSamples (int newLookaheadSamples) noexcept;
+
+    // Gate hold and hysteresis (brief section 3.9). Both default to 0, which
+    // is the exact v0.4.0 gate: the hold timer never arms, the shadow held
+    // envelope stays at 0, and the effective threshold is the plain smoothed
+    // threshold.
+    void setGateHoldMs (float newHoldMs) noexcept;
+    void setGateHysteresisDb (float newHysteresisDb) noexcept;
+
 private:
     static constexpr double smoothingTimeSeconds = 0.05;
 
@@ -98,12 +218,19 @@ private:
     // brickwall catch" role the High-band limiter option is meant to play.
     static constexpr float limiterReleaseMs = 50.0f;
 
+    // Worst-case lookahead the delay lines are sized for in prepare(): 5 ms,
+    // the longest value the Lookahead parameter offers (see ParameterIds.h).
+    static constexpr double maximumLookaheadSeconds = 0.005;
+
     // v0.2.0's own knee-aware VCA gain computer, replacing v0.1's
     // juce::dsp::Compressor - see the class-level doc comment above and
-    // src/dsp/KneeGainComputer.h. Uses the exact same peak-detection
-    // envelope-follower class juce::dsp::Compressor used internally, so
-    // attack/release behaviour is unchanged from v0.1.
-    juce::dsp::BallisticsFilter<float> envelopeFilter;
+    // src/dsp/KneeGainComputer.h. As of v0.5.0 the envelope follower lives
+    // inside Detector (src/dsp/Detector.h), which in its neutral Peak/Clean
+    // configuration is a thin wrapper around the very same
+    // juce::dsp::BallisticsFilter call v0.4.0 made - so attack/release
+    // behaviour is unchanged from v0.1 unless a v0.5.0 detector control is
+    // actually engaged.
+    Detector detector;
     juce::dsp::Gain<float> makeupGain;
     juce::dsp::Limiter<float> limiter;
     bool limiterEnabled = false;
@@ -129,6 +256,16 @@ private:
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> ratioSmoothed;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> kneeSmoothed;
 
+    // Range (v0.3.0): the smoothed value is the *effective* clamp bound fed
+    // straight to KneeGainComputer - when Range is disabled, its target is
+    // KneeGainComputer::unlimitedRangeDb (not a separate "disabled" flag),
+    // so toggling Range on/off ramps the clamp boundary smoothly over
+    // smoothingTimeSeconds instead of producing a hard discontinuity, the
+    // same real-time-safe approach used for the High-band limiter's
+    // continuously-tracked ballistics (see setLimiterEnabled's doc comment
+    // below).
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> rangeSmoothed;
+
     // Last commanded values (ParameterLayout defaults until a setter is
     // called), re-applied to the smoothers on every prepare() so re-prepare
     // (sample-rate change, etc.) never resets a live parameter back to a
@@ -141,6 +278,77 @@ private:
     float lastThresholdDb = -18.0f;
     float lastRatio = 4.0f;
     float lastKneePercent = 50.0f;
+
+    // Range (v0.3.0): tracked independently of the smoothed *effective*
+    // bound above, since the effective target depends on both of these
+    // (see setRangeEnabled()/setRangeDb()'s definitions).
+    bool rangeEnabled = false;
+    float lastRangeDb = 12.0f;
+
+    // Downward expansion / gating (v0.4.0): a second, independent envelope
+    // follower (see setGateEnabled()'s doc comment above) plus its own
+    // smoothed threshold/ratio, re-applied once per block for the same
+    // real-time-safety reason as thresholdSmoothed/ratioSmoothed above.
+    juce::dsp::BallisticsFilter<float> gateEnvelopeFilter;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> gateThresholdSmoothed;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> gateRatioSmoothed;
+    bool gateEnabled = false;
+    float lastGateThresholdDb = -50.0f;
+    float lastGateRatio = 2.0f;
+
+    // Per-band Mid/Side (v0.4.0): Side's own smoothed threshold/ratio - see
+    // setMidSideEnabled()'s doc comment above for why Knee/Attack/Release/
+    // Range stay shared with the main (Mid) path instead of doubling here
+    // too. No separate envelope follower is needed: envelopeFilter above
+    // already tracks independent per-channel state (it is called with a
+    // channel index - see process()), so the Side slot (channel index 1
+    // after encode) gets its own genuinely independent envelope trajectory
+    // "for free" from the same BallisticsFilter instance the Mid slot uses.
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> sideThresholdSmoothed;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> sideRatioSmoothed;
+    bool midSideEnabled = false;
+    float lastSideThresholdDb = -18.0f;
+    float lastSideRatio = 1.0f;
+
+    //==========================================================================
+    // v0.5.0 state.
+
+    // Lookahead (brief section 3.4). `audioDelay` gives the *compressor* its
+    // detector lead: the key is captured from the undelayed signal into
+    // keyBuffer, then the audio is delayed, so the envelope acts early.
+    // `lookaheadLimiter` is the alternative, overshoot-proof brickwall used
+    // when the optional limiter is engaged at the same time - it owns the
+    // delay in that case, so the band's total latency stays exactly
+    // lookaheadSamples either way.
+    trpt::LookaheadDelay audioDelay;
+    trpt::LookaheadLimiter lookaheadLimiter;
+    int lookaheadSamples = 0;
+
+    // Key scratch: the detectors' input when it differs from the band audio
+    // (external sidechain, or the undelayed capture taken before the
+    // lookahead delay). Sized in prepare(), never reallocated.
+    juce::AudioBuffer<float> keyBuffer;
+
+    // Per-sample gain trajectory scratch for the lookahead limiter.
+    std::vector<float> limiterGainScratch;
+
+    // Per-frame detector I/O scratch (one entry per channel).
+    std::vector<float> detectorKeyFrame;
+    std::vector<float> detectorEnvelopeFrame;
+    std::vector<float> gateEnvelopeFrame;
+
+    // Gate hold + hysteresis (brief section 3.9). The crossing state and the
+    // hold countdown are per band (the gate is a per-band decision); the
+    // shadow held envelope is per channel, because it composes with each
+    // channel's own gate envelope through a max().
+    float lastGateHoldMs = 0.0f;
+    float lastGateHysteresisDb = 0.0f;
+    float lastGateReleaseMs = 200.0f;
+    bool gateOpenState = false;
+    int gateHoldRemaining = 0;
+    std::vector<float> gateHoldState;
+
+    double sampleRate = 44100.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BandCompressor)
 };

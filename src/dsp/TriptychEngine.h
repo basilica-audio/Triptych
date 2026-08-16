@@ -4,6 +4,7 @@
 
 #include "BandCompressor.h"
 #include "Crossover.h"
+#include "GainReductionMeter.h"
 
 // The complete Triptych signal path, independent of juce::AudioProcessor so
 // it can be exercised directly by unit tests without instantiating a full
@@ -51,7 +52,13 @@ public:
     // larger than what prepare() was sized for is chunked internally into
     // <= prepared-capacity pieces (each run through the full signal chain in
     // turn) rather than leaving the excess samples unprocessed.
-    void process (juce::dsp::AudioBlock<float>& block);
+    // `sidechain` (v0.5.0): the host's external sidechain bus, or nullptr when
+    // the host has not connected/enabled one. Only consulted when the
+    // sidechain source is set to External; when External is selected but no
+    // usable sidechain arrives, the engine falls back to Internal keying
+    // silently (defensive, and documented in docs/manual.md).
+    void process (juce::dsp::AudioBlock<float>& block,
+                  const juce::dsp::AudioBlock<const float>* sidechain = nullptr);
 
     // Crossover split frequencies, in Hz. Real-time safe - smoothed and
     // re-applied once per block. The Mid/High split is always kept at least
@@ -68,6 +75,19 @@ public:
     void setLowAttackMs (float newAttackMs) { lowBand.setAttackMs (newAttackMs); }
     void setLowReleaseMs (float newReleaseMs) { lowBand.setReleaseMs (newReleaseMs); }
     void setLowMakeupDb (float newMakeupDb) { lowBand.setMakeupDb (newMakeupDb); }
+    void setLowRangeEnabled (bool shouldBeEnabled) noexcept { lowBand.setRangeEnabled (shouldBeEnabled); }
+    void setLowRangeDb (float newRangeDb) { lowBand.setRangeDb (newRangeDb); }
+
+    // Downward expansion / gating (v0.4.0, issue #25). See BandCompressor.h.
+    void setLowGateEnabled (bool shouldBeEnabled) noexcept { lowBand.setGateEnabled (shouldBeEnabled); }
+    void setLowGateThresholdDb (float newThresholdDb) { lowBand.setGateThresholdDb (newThresholdDb); }
+    void setLowGateRatio (float newRatio) { lowBand.setGateRatio (newRatio); }
+    void setLowGateAttackMs (float newAttackMs) { lowBand.setGateAttackMs (newAttackMs); }
+    void setLowGateReleaseMs (float newReleaseMs) { lowBand.setGateReleaseMs (newReleaseMs); }
+    // Per-band Mid/Side processing (v0.4.0, issue #24). See BandCompressor.h.
+    void setLowMidSideEnabled (bool shouldBeEnabled) noexcept { lowBand.setMidSideEnabled (shouldBeEnabled); }
+    void setLowSideThresholdDb (float newThresholdDb) { lowBand.setSideThresholdDb (newThresholdDb); }
+    void setLowSideRatio (float newRatio) { lowBand.setSideRatio (newRatio); }
 
     void setMidThresholdDb (float newThresholdDb) { midBand.setThresholdDb (newThresholdDb); }
     void setMidRatio (float newRatio) { midBand.setRatio (newRatio); }
@@ -75,6 +95,17 @@ public:
     void setMidAttackMs (float newAttackMs) { midBand.setAttackMs (newAttackMs); }
     void setMidReleaseMs (float newReleaseMs) { midBand.setReleaseMs (newReleaseMs); }
     void setMidMakeupDb (float newMakeupDb) { midBand.setMakeupDb (newMakeupDb); }
+    void setMidRangeEnabled (bool shouldBeEnabled) noexcept { midBand.setRangeEnabled (shouldBeEnabled); }
+    void setMidRangeDb (float newRangeDb) { midBand.setRangeDb (newRangeDb); }
+
+    void setMidGateEnabled (bool shouldBeEnabled) noexcept { midBand.setGateEnabled (shouldBeEnabled); }
+    void setMidGateThresholdDb (float newThresholdDb) { midBand.setGateThresholdDb (newThresholdDb); }
+    void setMidGateRatio (float newRatio) { midBand.setGateRatio (newRatio); }
+    void setMidGateAttackMs (float newAttackMs) { midBand.setGateAttackMs (newAttackMs); }
+    void setMidGateReleaseMs (float newReleaseMs) { midBand.setGateReleaseMs (newReleaseMs); }
+    void setMidMidSideEnabled (bool shouldBeEnabled) noexcept { midBand.setMidSideEnabled (shouldBeEnabled); }
+    void setMidSideThresholdDb (float newThresholdDb) { midBand.setSideThresholdDb (newThresholdDb); }
+    void setMidSideRatio (float newRatio) { midBand.setSideRatio (newRatio); }
 
     void setHighThresholdDb (float newThresholdDb) { highBand.setThresholdDb (newThresholdDb); }
     void setHighRatio (float newRatio) { highBand.setRatio (newRatio); }
@@ -82,6 +113,17 @@ public:
     void setHighAttackMs (float newAttackMs) { highBand.setAttackMs (newAttackMs); }
     void setHighReleaseMs (float newReleaseMs) { highBand.setReleaseMs (newReleaseMs); }
     void setHighMakeupDb (float newMakeupDb) { highBand.setMakeupDb (newMakeupDb); }
+    void setHighRangeEnabled (bool shouldBeEnabled) noexcept { highBand.setRangeEnabled (shouldBeEnabled); }
+    void setHighRangeDb (float newRangeDb) { highBand.setRangeDb (newRangeDb); }
+
+    void setHighGateEnabled (bool shouldBeEnabled) noexcept { highBand.setGateEnabled (shouldBeEnabled); }
+    void setHighGateThresholdDb (float newThresholdDb) { highBand.setGateThresholdDb (newThresholdDb); }
+    void setHighGateRatio (float newRatio) { highBand.setGateRatio (newRatio); }
+    void setHighGateAttackMs (float newAttackMs) { highBand.setGateAttackMs (newAttackMs); }
+    void setHighGateReleaseMs (float newReleaseMs) { highBand.setGateReleaseMs (newReleaseMs); }
+    void setHighMidSideEnabled (bool shouldBeEnabled) noexcept { highBand.setMidSideEnabled (shouldBeEnabled); }
+    void setHighSideThresholdDb (float newThresholdDb) { highBand.setSideThresholdDb (newThresholdDb); }
+    void setHighSideRatio (float newRatio) { highBand.setSideRatio (newRatio); }
 
     // High-band limiter option (M1). See BandCompressor::setLimiterEnabled
     // for why toggling this is real-time safe with no added latency.
@@ -104,16 +146,75 @@ public:
     // Master output trim, applied after the three bands are summed.
     void setOutputDb (float newOutputDb);
 
-    // Always 0: the LR4 crossovers and juce::dsp::Compressor are both
-    // minimum-phase/causal with no lookahead (see class comment above).
-    static constexpr int getLatencySamples() noexcept { return 0; }
+    //==========================================================================
+    // v0.5.0 additions. Every default is neutral.
+
+    // Detector v2, per band (see src/dsp/Detector.h).
+    void setLowDetectorLaw (Detector::Law newLaw) noexcept { lowBand.setDetectorLaw (newLaw); }
+    void setLowDetectorCharacter (Detector::Character newCharacter) noexcept { lowBand.setDetectorCharacter (newCharacter); }
+    void setLowAutoReleaseEnabled (bool shouldBeEnabled) noexcept { lowBand.setAutoReleaseEnabled (shouldBeEnabled); }
+    void setLowStereoLinkPercent (float newPercent) noexcept { lowBand.setStereoLinkPercent (newPercent); }
+    void setLowGateHoldMs (float newHoldMs) noexcept { lowBand.setGateHoldMs (newHoldMs); }
+    void setLowGateHysteresisDb (float newHysteresisDb) noexcept { lowBand.setGateHysteresisDb (newHysteresisDb); }
+
+    void setMidDetectorLaw (Detector::Law newLaw) noexcept { midBand.setDetectorLaw (newLaw); }
+    void setMidDetectorCharacter (Detector::Character newCharacter) noexcept { midBand.setDetectorCharacter (newCharacter); }
+    void setMidAutoReleaseEnabled (bool shouldBeEnabled) noexcept { midBand.setAutoReleaseEnabled (shouldBeEnabled); }
+    void setMidStereoLinkPercent (float newPercent) noexcept { midBand.setStereoLinkPercent (newPercent); }
+    void setMidGateHoldMs (float newHoldMs) noexcept { midBand.setGateHoldMs (newHoldMs); }
+    void setMidGateHysteresisDb (float newHysteresisDb) noexcept { midBand.setGateHysteresisDb (newHysteresisDb); }
+
+    void setHighDetectorLaw (Detector::Law newLaw) noexcept { highBand.setDetectorLaw (newLaw); }
+    void setHighDetectorCharacter (Detector::Character newCharacter) noexcept { highBand.setDetectorCharacter (newCharacter); }
+    void setHighAutoReleaseEnabled (bool shouldBeEnabled) noexcept { highBand.setAutoReleaseEnabled (shouldBeEnabled); }
+    void setHighStereoLinkPercent (float newPercent) noexcept { highBand.setStereoLinkPercent (newPercent); }
+    void setHighGateHoldMs (float newHoldMs) noexcept { highBand.setGateHoldMs (newHoldMs); }
+    void setHighGateHysteresisDb (float newHysteresisDb) noexcept { highBand.setGateHysteresisDb (newHysteresisDb); }
+
+    // Selectable crossover slope, applied to both split points and to the
+    // sidechain's own crossover pair. A structural switch: filter state is
+    // reset, which can click (documented in docs/manual.md).
+    void setCrossoverSlope (Crossover::Slope newSlope);
+
+    // Global lookahead, in samples. Must be re-applied through prepare() or a
+    // message-thread reconfigure - never changed from the audio thread, since
+    // it changes the reported latency.
+    void setLookaheadSamples (int newLookaheadSamples) noexcept;
+
+    // External sidechain keying and detector-key monitoring.
+    enum class SidechainListen
+    {
+        off = 0,
+        low = 1,
+        mid = 2,
+        high = 3
+    };
+
+    void setSidechainExternal (bool shouldUseExternal) noexcept { sidechainExternal = shouldUseExternal; }
+    void setSidechainListen (SidechainListen newListen) noexcept { sidechainListen = newListen; }
+
+    // Global dry/wet mix, 0-100%. 100% (the default) is fully wet and is
+    // structurally bypassed while lookahead is Off, so the default path never
+    // touches the mixer at all.
+    void setMixPercent (float newMixPercent);
+
+    // Per-band gain-reduction telemetry for the editor (see
+    // src/dsp/GainReductionMeter.h). Read from the message thread.
+    const trpt::GainReductionMeter& getGainReductionMeter() const noexcept { return gainReductionMeter; }
+
+    // 0 while lookahead is Off - the v0.1-v0.4 invariant, retained for every
+    // existing session. Non-zero exactly equals the configured lookahead
+    // length in samples; the LR crossovers (minimum-phase IIR) and the
+    // ballistics-driven gain computers add nothing on top of it.
+    int getLatencySamples() const noexcept { return lookaheadSamples; }
 
 private:
     // Processes a single chunk of at most the prepared per-band buffer
     // capacity - the full signal chain (crossovers, band compressors,
     // Mute/Solo gate, output trim) for one call. process() above splits any
     // larger host-supplied block into a sequence of these.
-    void processChunk (juce::dsp::AudioBlock<float> workingBlock);
+    void processChunk (juce::dsp::AudioBlock<float> workingBlock,
+                        const juce::dsp::AudioBlock<const float>* sidechainChunk);
 
     static constexpr double smoothingTimeSeconds = 0.05;
 
@@ -126,6 +227,12 @@ private:
 
     Crossover lowMidCrossover;
     Crossover midHighCrossover;
+
+    // v0.5.0 external sidechain: a second, independent crossover pair running
+    // the same split frequencies and slope as the main path, so each band's
+    // detector gets a band-matched key rather than the full-range sidechain.
+    Crossover sidechainLowMidCrossover;
+    Crossover sidechainMidHighCrossover;
 
     BandCompressor lowBand;
     BandCompressor midBand;
@@ -180,6 +287,37 @@ private:
     // channels (Low/Mid/High), sized to the maximum chunk capacity in
     // prepare() and never reallocated on the audio thread.
     juce::AudioBuffer<float> muteSoloGainBuffer;
+
+    //==========================================================================
+    // v0.5.0 state.
+
+    // Sidechain band buffers, mirroring the main path's tree.
+    juce::AudioBuffer<float> sidechainInputBuffer;
+    juce::AudioBuffer<float> sidechainLowBuffer;
+    juce::AudioBuffer<float> sidechainMidHighBuffer;
+    juce::AudioBuffer<float> sidechainMidBuffer;
+    juce::AudioBuffer<float> sidechainHighBuffer;
+
+    // Detector-key monitoring scratch: a copy of whichever band key the
+    // Sidechain Listen selection is auditioning, taken before the bands
+    // consume it. Only filled while listening.
+    juce::AudioBuffer<float> listenBuffer;
+
+    // Sized for the worst-case wet latency the Lookahead parameter can ask
+    // for: 5 ms at 192 kHz is 960 samples, so 1024 covers every supported
+    // rate. juce::dsp::DryWetMixer's default-constructed maximum is 0, which
+    // would assert the moment setWetLatency() is called.
+    static constexpr int maximumWetLatencySamples = 1024;
+
+    juce::dsp::DryWetMixer<float> dryWetMixer { maximumWetLatencySamples };
+
+    trpt::GainReductionMeter gainReductionMeter;
+
+    Crossover::Slope crossoverSlope = Crossover::Slope::lr4;
+    int lookaheadSamples = 0;
+    bool sidechainExternal = false;
+    SidechainListen sidechainListen = SidechainListen::off;
+    float lastMixPercent = 100.0f;
 
     double sampleRate = 44100.0;
 

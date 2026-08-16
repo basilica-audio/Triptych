@@ -82,8 +82,13 @@ TEST_CASE ("Mono bus layout is supported and processes without NaN/Inf", "[robus
 {
     TriptychAudioProcessor processor;
 
+    // v0.5.0: the processor declares a second (sidechain) input bus, so a
+    // layout handed to setBusesLayout() has to describe both input buses -
+    // the sidechain simply stays disabled here, which is exactly how hosts
+    // that do not offer one instantiate the plugin.
     juce::AudioProcessor::BusesLayout monoLayout;
     monoLayout.inputBuses.add (juce::AudioChannelSet::mono());
+    monoLayout.inputBuses.add (juce::AudioChannelSet::disabled());
     monoLayout.outputBuses.add (juce::AudioChannelSet::mono());
 
     REQUIRE (processor.isBusesLayoutSupported (monoLayout));

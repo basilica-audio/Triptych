@@ -17,13 +17,32 @@ namespace
     constexpr int rowHeight = labelHeight + knobSize + textBoxHeight;
     constexpr int presetBarHeight = 28;
     constexpr int numBandKnobRows = 6; // Threshold/Ratio/Knee/Attack/Release/Makeup (Knee added in v0.2.0)
+    constexpr int numGateKnobRows = 4; // Gate Threshold/Ratio/Attack/Release (v0.4.0, issue #25)
+    constexpr int numMidSideKnobRows = 2; // Side Threshold/Side Ratio (v0.4.0, issue #24)
+    constexpr int numDetectorKnobRows = 3; // Stereo Link/Gate Hold/Gate Hysteresis (v0.5.0)
+    constexpr int comboRowHeight = labelHeight + 24;
+    constexpr int gainReductionBarHeight = 90;
 
     constexpr int editorWidth = margin * 2 + numColumns * knobSize + (numColumns + 1) * margin;
 
     // Preset bar + top strip + band labels + Mute/Solo row + band knob rows
-    // + the High-band limiter option's own toggle row and threshold-knob row.
-    constexpr int editorHeight = margin + presetBarHeight + margin + rowHeight + margin + bandLabelHeight + toggleRowHeight
-                                  + numBandKnobRows * rowHeight + margin + toggleRowHeight + rowHeight + margin;
+    // + each band's own Range enable-toggle row and Range-knob row (v0.3.0)
+    // + each band's own Gate enable-toggle row and four Gate knob rows
+    // (v0.4.0, issue #25) + each band's own M/S enable-toggle row and two
+    // Side knob rows (v0.4.0, issue #24) + the High-band limiter option's
+    // own toggle row and threshold-knob row.
+    // v0.5.0 adds a second global strip (Sidechain Source/Listen, Crossover
+    // Slope, Lookahead, Mix) and, per band column, a detector combo row, an
+    // Auto Release toggle, a Character combo, three knobs and a GR bar.
+    constexpr int editorHeight = margin + presetBarHeight + margin + rowHeight + margin
+                                  + comboRowHeight + margin + comboRowHeight + margin
+                                  + bandLabelHeight + gainReductionBarHeight + toggleRowHeight
+                                  + numBandKnobRows * rowHeight + toggleRowHeight + rowHeight
+                                  + toggleRowHeight + numGateKnobRows * rowHeight
+                                  + toggleRowHeight + numMidSideKnobRows * rowHeight
+                                  + comboRowHeight + toggleRowHeight + comboRowHeight
+                                  + numDetectorKnobRows * rowHeight
+                                  + margin + toggleRowHeight + rowHeight + margin;
 
     // M2 i18n frame (.scaffold/specs/preset-system-m2.md): selects German
     // (resources/i18n/de.txt) or falls through to English, once, at editor
@@ -66,6 +85,16 @@ TriptychAudioProcessorEditor::TriptychAudioProcessorEditor (TriptychAudioProcess
     configureKnob (lowControls.attack, ParamIDs::lowAttack, "Attack");
     configureKnob (lowControls.release, ParamIDs::lowRelease, "Release");
     configureKnob (lowControls.makeup, ParamIDs::lowMakeup, "Makeup");
+    configureToggle (lowControls.rangeEnabled, ParamIDs::lowRangeEnabled, "Range On");
+    configureKnob (lowControls.range, ParamIDs::lowRange, "Range");
+    configureToggle (lowControls.gateEnabled, ParamIDs::lowGateEnabled, "Gate On");
+    configureKnob (lowControls.gateThreshold, ParamIDs::lowGateThreshold, "Gate Thresh");
+    configureKnob (lowControls.gateRatio, ParamIDs::lowGateRatio, "Gate Ratio");
+    configureKnob (lowControls.gateAttack, ParamIDs::lowGateAttack, "Gate Attack");
+    configureKnob (lowControls.gateRelease, ParamIDs::lowGateRelease, "Gate Release");
+    configureToggle (lowControls.midSideEnabled, ParamIDs::lowMidSideEnabled, "M/S On");
+    configureKnob (lowControls.sideThreshold, ParamIDs::lowSideThreshold, "Side Thresh");
+    configureKnob (lowControls.sideRatio, ParamIDs::lowSideRatio, "Side Ratio");
 
     configureToggle (midControls.mute, ParamIDs::midMute, "Mute");
     configureToggle (midControls.solo, ParamIDs::midSolo, "Solo");
@@ -75,6 +104,16 @@ TriptychAudioProcessorEditor::TriptychAudioProcessorEditor (TriptychAudioProcess
     configureKnob (midControls.attack, ParamIDs::midAttack, "Attack");
     configureKnob (midControls.release, ParamIDs::midRelease, "Release");
     configureKnob (midControls.makeup, ParamIDs::midMakeup, "Makeup");
+    configureToggle (midControls.rangeEnabled, ParamIDs::midRangeEnabled, "Range On");
+    configureKnob (midControls.range, ParamIDs::midRange, "Range");
+    configureToggle (midControls.gateEnabled, ParamIDs::midGateEnabled, "Gate On");
+    configureKnob (midControls.gateThreshold, ParamIDs::midGateThreshold, "Gate Thresh");
+    configureKnob (midControls.gateRatio, ParamIDs::midGateRatio, "Gate Ratio");
+    configureKnob (midControls.gateAttack, ParamIDs::midGateAttack, "Gate Attack");
+    configureKnob (midControls.gateRelease, ParamIDs::midGateRelease, "Gate Release");
+    configureToggle (midControls.midSideEnabled, ParamIDs::midMidSideEnabled, "M/S On");
+    configureKnob (midControls.sideThreshold, ParamIDs::midSideThreshold, "Side Thresh");
+    configureKnob (midControls.sideRatio, ParamIDs::midSideRatio, "Side Ratio");
 
     configureToggle (highControls.mute, ParamIDs::highMute, "Mute");
     configureToggle (highControls.solo, ParamIDs::highSolo, "Solo");
@@ -84,15 +123,145 @@ TriptychAudioProcessorEditor::TriptychAudioProcessorEditor (TriptychAudioProcess
     configureKnob (highControls.attack, ParamIDs::highAttack, "Attack");
     configureKnob (highControls.release, ParamIDs::highRelease, "Release");
     configureKnob (highControls.makeup, ParamIDs::highMakeup, "Makeup");
+    configureToggle (highControls.rangeEnabled, ParamIDs::highRangeEnabled, "Range On");
+    configureKnob (highControls.range, ParamIDs::highRange, "Range");
+    configureToggle (highControls.gateEnabled, ParamIDs::highGateEnabled, "Gate On");
+    configureKnob (highControls.gateThreshold, ParamIDs::highGateThreshold, "Gate Thresh");
+    configureKnob (highControls.gateRatio, ParamIDs::highGateRatio, "Gate Ratio");
+    configureKnob (highControls.gateAttack, ParamIDs::highGateAttack, "Gate Attack");
+    configureKnob (highControls.gateRelease, ParamIDs::highGateRelease, "Gate Release");
+    configureToggle (highControls.midSideEnabled, ParamIDs::highMidSideEnabled, "M/S On");
+    configureKnob (highControls.sideThreshold, ParamIDs::highSideThreshold, "Side Thresh");
+    configureKnob (highControls.sideRatio, ParamIDs::highSideRatio, "Side Ratio");
 
     configureToggle (highLimiterEnabledToggle, ParamIDs::highLimiterEnabled, "Limiter");
     configureKnob (highLimiterThresholdKnob, ParamIDs::highLimiterThreshold, "Lim. Thresh");
 
+    // v0.5.0 global strip.
+    configureChoice (sidechainSourceChoice, ParamIDs::scSource, "SC Source");
+    configureChoice (sidechainListenChoice, ParamIDs::scListen, "SC Listen");
+    configureChoice (crossoverSlopeChoice, ParamIDs::crossoverSlope, "Slope");
+    configureChoice (lookaheadChoice, ParamIDs::lookahead, "Lookahead");
+    configureKnob (mixKnob, ParamIDs::mix, "Mix");
+
+    // v0.5.0 per-band detector + gate-shaping controls and GR bars.
+    configureBandExtras (lowControls, ParamIDs::lowDetectorMode, ParamIDs::lowAutoRelease, ParamIDs::lowCharacter,
+                          ParamIDs::lowStereoLink, ParamIDs::lowGateHold, ParamIDs::lowGateHysteresis);
+    configureBandExtras (midControls, ParamIDs::midDetectorMode, ParamIDs::midAutoRelease, ParamIDs::midCharacter,
+                          ParamIDs::midStereoLink, ParamIDs::midGateHold, ParamIDs::midGateHysteresis);
+    configureBandExtras (highControls, ParamIDs::highDetectorMode, ParamIDs::highAutoRelease, ParamIDs::highCharacter,
+                          ParamIDs::highStereoLink, ParamIDs::highGateHold, ParamIDs::highGateHysteresis);
+
     setResizable (false, false);
     setSize (editorWidth, editorHeight);
+
+    // 30 Hz is plenty for gain-reduction bars and keeps the message thread
+    // cheap; the audio thread only ever does a relaxed atomic store.
+    startTimerHz (30);
 }
 
-TriptychAudioProcessorEditor::~TriptychAudioProcessorEditor() = default;
+TriptychAudioProcessorEditor::~TriptychAudioProcessorEditor()
+{
+    stopTimer();
+}
+
+void TriptychAudioProcessorEditor::GainReductionBar::paint (juce::Graphics& g)
+{
+    // Bottom-anchored bar: full height at 0 dB reduction, shrinking as the
+    // band pulls the signal down. 24 dB of travel covers every realistic
+    // multiband operating point.
+    constexpr auto fullScaleDb = 24.0f;
+
+    auto bounds = getLocalBounds().toFloat().reduced (2.0f);
+
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
+    g.fillRect (bounds);
+
+    const auto reduction = juce::jlimit (0.0f, fullScaleDb, -currentDb);
+    const auto held = juce::jlimit (0.0f, fullScaleDb, -heldDb);
+
+    if (reduction > 0.0f)
+    {
+        const auto barHeight = bounds.getHeight() * reduction / fullScaleDb;
+        g.setColour (juce::Colours::orange.withAlpha (0.8f));
+        g.fillRect (bounds.withHeight (barHeight));
+    }
+
+    if (held > 0.0f)
+    {
+        const auto y = bounds.getY() + bounds.getHeight() * held / fullScaleDb;
+        g.setColour (juce::Colours::white.withAlpha (0.8f));
+        g.fillRect (bounds.getX(), y, bounds.getWidth(), 1.5f);
+    }
+
+    g.setColour (juce::Colours::white.withAlpha (0.35f));
+    g.drawRect (bounds, 1.0f);
+}
+
+void TriptychAudioProcessorEditor::timerCallback()
+{
+    const auto& meter = audioProcessor.getGainReductionMeter();
+
+    // Compressor and gate reductions are both attenuations, so the visible
+    // bar shows their sum - what the band actually did to the signal.
+    const auto update = [] (GainReductionBar& bar, const trpt::BandGainReduction& source)
+    {
+        const auto value = source.loadCompressorDb() + source.loadGateDb();
+
+        bar.currentDb = value;
+
+        // Peak hold with a slow decay back toward the live value.
+        bar.heldDb = value < bar.heldDb ? value : juce::jmin (0.0f, bar.heldDb + 0.6f);
+
+        bar.repaint();
+    };
+
+    update (lowControls.gainReductionBar, meter.low);
+    update (midControls.gainReductionBar, meter.mid);
+    update (highControls.gainReductionBar, meter.high);
+}
+
+void TriptychAudioProcessorEditor::configureChoice (Choice& choice, const juce::String& parameterId, const juce::String& labelText)
+{
+    // ComboBoxAttachment (JUCE 8.0.14) syncs the *selection* only - it never
+    // populates the item list. Fill it from the parameter's own choices first,
+    // then attach, otherwise the box shows an empty popup.
+    if (auto* parameter = dynamic_cast<juce::AudioParameterChoice*> (audioProcessor.apvts.getParameter (parameterId)))
+    {
+        const auto& choices = parameter->choices;
+
+        for (int index = 0; index < choices.size(); ++index)
+            choice.box.addItem (choices[index], index + 1);
+    }
+
+    addAndMakeVisible (choice.box);
+
+    // Deliberately not TRANS()'d - see configureKnob()'s comment above.
+    choice.label.setText (labelText, juce::dontSendNotification);
+    choice.label.setJustificationType (juce::Justification::centred);
+    choice.label.attachToComponent (&choice.box, false);
+    addAndMakeVisible (choice.label);
+
+    choice.attachment = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, parameterId, choice.box);
+}
+
+void TriptychAudioProcessorEditor::configureBandExtras (BandControls& controls,
+                                                         const juce::String& detectorModeId,
+                                                         const juce::String& autoReleaseId,
+                                                         const juce::String& characterId,
+                                                         const juce::String& stereoLinkId,
+                                                         const juce::String& gateHoldId,
+                                                         const juce::String& gateHysteresisId)
+{
+    configureChoice (controls.detectorMode, detectorModeId, "Detector");
+    configureToggle (controls.autoRelease, autoReleaseId, "Auto Rel");
+    configureChoice (controls.character, characterId, "Character");
+    configureKnob (controls.stereoLink, stereoLinkId, "Link");
+    configureKnob (controls.gateHold, gateHoldId, "Gate Hold");
+    configureKnob (controls.gateHysteresis, gateHysteresisId, "Gate Hyst");
+
+    addAndMakeVisible (controls.gainReductionBar);
+}
 
 void TriptychAudioProcessorEditor::configureKnob (Knob& knob, const juce::String& parameterId, const juce::String& labelText)
 {
@@ -149,12 +318,33 @@ void TriptychAudioProcessorEditor::resized()
 
     bounds.removeFromTop (margin);
 
+    // v0.5.0 global strip, two rows: sidechain source/listen/slope, then
+    // lookahead + mix.
+    auto sidechainRow = bounds.removeFromTop (comboRowHeight);
+    sidechainSourceChoice.box.setBounds (sidechainRow.removeFromLeft (slotWidth).reduced (margin / 2, labelHeight / 2));
+    sidechainListenChoice.box.setBounds (sidechainRow.removeFromLeft (slotWidth).reduced (margin / 2, labelHeight / 2));
+    crossoverSlopeChoice.box.setBounds (sidechainRow.removeFromLeft (slotWidth).reduced (margin / 2, labelHeight / 2));
+
+    bounds.removeFromTop (margin);
+
+    auto lookaheadRow = bounds.removeFromTop (comboRowHeight);
+    lookaheadChoice.box.setBounds (lookaheadRow.removeFromLeft (slotWidth).reduced (margin / 2, labelHeight / 2));
+    mixKnob.slider.setBounds (lookaheadRow.removeFromLeft (slotWidth).reduced (margin / 2, 0));
+
+    bounds.removeFromTop (margin);
+
     auto bandLabelRow = bounds.removeFromTop (bandLabelHeight);
     const auto bandSlotWidth = bandLabelRow.getWidth() / numColumns;
 
     lowBandLabel.setBounds (bandLabelRow.removeFromLeft (bandSlotWidth));
     midBandLabel.setBounds (bandLabelRow.removeFromLeft (bandSlotWidth));
     highBandLabel.setBounds (bandLabelRow.removeFromLeft (bandSlotWidth));
+
+    // Per-band gain-reduction bars (v0.5.0), directly under each band label.
+    auto gainReductionRow = bounds.removeFromTop (gainReductionBarHeight);
+
+    for (auto* bar : { &lowControls.gainReductionBar, &midControls.gainReductionBar, &highControls.gainReductionBar })
+        bar->setBounds (gainReductionRow.removeFromLeft (bandSlotWidth).reduced (bandSlotWidth / 3, 4));
 
     // Mute/Solo row: one slot per band, each split into a left (Mute) and
     // right (Solo) half.
@@ -184,8 +374,61 @@ void TriptychAudioProcessorEditor::resized()
     for (auto* knob : { &highControls.threshold, &highControls.ratio, &highControls.knee, &highControls.attack, &highControls.release, &highControls.makeup })
         knob->slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
 
-    // High-band limiter option (M1): High column only, below its six
+    // Range enable + amount (v0.3.0): every band, directly below its six
     // compression knobs.
+    lowControls.rangeEnabled.button.setBounds (lowColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    lowControls.range.slider.setBounds (lowColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    midControls.rangeEnabled.button.setBounds (midColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    midControls.range.slider.setBounds (midColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    highControls.rangeEnabled.button.setBounds (highColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    highControls.range.slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    // Downward expansion / gating (v0.4.0, issue #25): every band, directly
+    // below its Range row.
+    lowControls.gateEnabled.button.setBounds (lowColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    for (auto* knob : { &lowControls.gateThreshold, &lowControls.gateRatio, &lowControls.gateAttack, &lowControls.gateRelease })
+        knob->slider.setBounds (lowColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    midControls.gateEnabled.button.setBounds (midColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    for (auto* knob : { &midControls.gateThreshold, &midControls.gateRatio, &midControls.gateAttack, &midControls.gateRelease })
+        knob->slider.setBounds (midColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    highControls.gateEnabled.button.setBounds (highColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    for (auto* knob : { &highControls.gateThreshold, &highControls.gateRatio, &highControls.gateAttack, &highControls.gateRelease })
+        knob->slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    // Per-band Mid/Side processing (v0.4.0, issue #24): every band, directly
+    // below its Gate rows.
+    lowControls.midSideEnabled.button.setBounds (lowColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    lowControls.sideThreshold.slider.setBounds (lowColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+    lowControls.sideRatio.slider.setBounds (lowColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    midControls.midSideEnabled.button.setBounds (midColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    midControls.sideThreshold.slider.setBounds (midColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+    midControls.sideRatio.slider.setBounds (midColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    highControls.midSideEnabled.button.setBounds (highColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+    highControls.sideThreshold.slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+    highControls.sideRatio.slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
+
+    // v0.5.0 detector + gate-shaping controls, every band, below its M/S rows.
+    const auto placeBandExtras = [] (juce::Rectangle<int>& column, BandControls& controls)
+    {
+        controls.detectorMode.box.setBounds (column.removeFromTop (comboRowHeight).reduced (margin / 2, labelHeight / 2));
+        controls.autoRelease.button.setBounds (column.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
+        controls.character.box.setBounds (column.removeFromTop (comboRowHeight).reduced (margin / 2, labelHeight / 2));
+
+        for (auto* knob : { &controls.stereoLink, &controls.gateHold, &controls.gateHysteresis })
+            knob->slider.setBounds (column.removeFromTop (rowHeight).reduced (margin / 2, 0));
+    };
+
+    placeBandExtras (lowColumn, lowControls);
+    placeBandExtras (midColumn, midControls);
+    placeBandExtras (highColumn, highControls);
+
+    // High-band limiter option (M1): High column only, below everything else.
     highLimiterEnabledToggle.button.setBounds (highColumn.removeFromTop (toggleRowHeight).reduced (margin / 2, 2));
     highLimiterThresholdKnob.slider.setBounds (highColumn.removeFromTop (rowHeight).reduced (margin / 2, 0));
 }

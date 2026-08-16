@@ -18,7 +18,7 @@ Triptych is a **mastering/mix-bus dynamics tool**, not a per-instrument effect. 
 Full mix (guitars + orchestra + choir + drums/bass) -> Triptych (multiband glue/control) -> brickwall limiter -> master out
 ```
 
-Reach for it when a single-band compressor either over-squashes the low end to control high-frequency peaks, or leaves the low end loose while the highs are already well-controlled - the classic symphony-metal problem of a dense wall of distorted guitars, orchestral hits, and choir all competing for the same headroom. It also works well as a "glue" stage on a drum bus or a full guitar stack, independent of the full mix.
+Reach for it when a single-band compressor either over-squashes the low end to control high-frequency peaks, or leaves the low end loose while the highs are already well-controlled - the classic heavy-music problem of a dense wall of distorted guitars, orchestral hits, and choir all competing for the same headroom. It also works well as a "glue" stage on a drum bus or a full guitar stack, independent of the full mix.
 
 ## Signal flow
 

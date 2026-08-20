@@ -138,9 +138,9 @@ These four controls shape the **compressor's** detector only. The band's Gate ke
 
 Both are 0 by default, which is exactly the v0.4.0 gate. Both are also implemented so that neither can click: hold works on the gate's envelope rather than pinning its output gain, and the threshold moves through the same 50 ms smoother every other threshold change uses.
 
-### Gain-reduction meters *(new in v0.5.0)*
+### Gain-reduction meters *(new in v0.5.0; needle meters since the M3 editor)*
 
-Each band column carries a thin vertical bar showing how much that band is currently pulling the signal down (compressor and gate combined), with a slowly-decaying peak-hold line. Full scale is 24 dB. These are read-only - they exist so you can see at a glance which band is doing the work.
+Each band column carries a vector needle meter showing how much that band is currently pulling the signal down (compressor and gate combined) on an engraved 0/3/6/10/20 dB scale with gentle meter ballistics - the needle rests right at 0 dB and sweeps left as reduction deepens. These are read-only - they exist so you can see at a glance which band is doing the work. For screen-reader users, each meter also exposes its smoothed reading as an on-demand accessible value.
 
 ### Controls to change with the transport stopped
 
@@ -243,7 +243,7 @@ The preset bar's labels, menus, and dialogs follow your system language automati
 
 ## Known limitations
 
-- **The spectrum-on-curve analyser is not in this release.** v0.5.0 ships the three per-band gain-reduction bars only (see "Gain-reduction meters" above); a frequency-domain analyser overlay is scoped for the M3 custom-GUI milestone, not cut late.
+- **The spectrum-on-curve analyser is not in this release.** The editor ships the three per-band gain-reduction needle meters only (see "Gain-reduction meters" above); a frequency-domain analyser overlay remains future scope.
 - **Deferred to v0.6.0+**: a linear-phase FIR crossover mode (paired with all-pass compensation for the phase behaviour below), per-band sidechain EQ, per-band dry/wet mix, sample-accurate parameter interpolation (today's smoothing resolves on a 50 ms timer rather than per sample), and a gate range floor.
 - **The three-band crossover tree is magnitude-flat but not phase-flat** at any Slope setting - see "Crossover slopes and phase" above. This only matters when mixing Triptych's output against a dry copy of the same signal (including via **Mix**) or when measuring with a phase-aware analyser; it does not matter for normal serial use.
 - **The VCA knee's target width becomes unreachable within about 3 dB of a 0 dB threshold** - see the note under "Per-band detector" above. The achieved width narrows smoothly toward a hard knee as the threshold approaches 0 dB; nothing misbehaves numerically, but the full VCA rounding needs a threshold at −3 dB or below.

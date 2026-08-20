@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **M3 custom vector editor** (issue #4, ported from Miserere's merged M3
+  implementation, basilica-audio/miserere PR #31): the interim slider/dropdown
+  editor is replaced by the suite's fully vector-drawn black/gold surface —
+  pointer knobs with engraved scale rings (choice parameters as detented knobs
+  announcing the choice *name*), lamp toggles, EB Garamond typography embedded
+  via BinaryData (OFL licensed), and four signal-flow panels: a Global strip
+  (crossovers, slope, lookahead, sidechain, mix, output) above the three band
+  columns (Low / Mid / High). No photoreal PNG assets; everything is drawn at
+  runtime with `juce::Graphics`/`juce::Path`.
+- **Per-band gain-reduction needle meters**: the v0.5.0 GR bars become vector
+  needle meters (one per band column, compressor + gate reduction combined)
+  driven by the engine's existing relaxed-atomic `GainReductionMeter` via a
+  30 Hz GUI timer with one-pole ballistics.
+- **Accessible parameter surface** (WCAG 2.1 AA): every control keyboard-
+  operable (WAI-ARIA stepping: Arrow 1%, Shift+Arrow fine, PageUp/Down 10%,
+  Home/End extremes), visible focus rings on all custom-painted controls,
+  name/value/role for every knob/toggle/meter (unit-suffixed accessible values,
+  read-only meter values), section panels as accessibility focus containers
+  (grouped AT navigation without trapping Tab), and WCAG-contrast unit tests
+  pinned to the exact rendered colour pairs. New test suites:
+  `tests/gui/EditorAccessibilityTests.cpp`, `EditorLayoutTests.cpp`,
+  `BasilicaLookAndFeelContrastTests.cpp`, `NeedleMeterTests.cpp`.
+
 ## [0.5.1] - 2026-07-31
 
 Race-fix patch release.

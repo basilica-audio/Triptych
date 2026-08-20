@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-08-20
+
+The M3 GUI release. The interim slider editor becomes the suite's fully
+vector-drawn, fully accessible surface, and the v0.5.0 gain-reduction bars
+become per-band needle meters. Editor-only: no processor or DSP file is
+touched, so the audio path is bit-identical to v0.5.1.
 
 ### Added
 

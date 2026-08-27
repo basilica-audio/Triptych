@@ -1104,7 +1104,12 @@ TEST_CASE ("T16: VCA character reproduces the emergent-knee width table", "[band
 
         INFO ("ratio=" << expectation.ratio << " T=" << expectation.thresholdDb
                         << " knee%=" << kneePercent << " measured=" << measured);
-        CHECK (measured == Catch::Approx (expectation.expectedWidthDb).margin (0.5));
+        // Derived: the mapping 100 * (W/2) / |T| is exact in this region, so
+        // the only error is measureKneeWidthDb's own resolution - each slope
+        // crossing is located to within one 0.01 dB scan step, and float
+        // noise in the numerical derivative adds at most another step, so
+        // the width is exact to within 3 * 0.01 / 0.8 = 0.04 dB.
+        CHECK (measured == Catch::Approx (expectation.expectedWidthDb).margin (0.05));
     }
 
     // The ordering itself is the signature: gentler ratios round more.
@@ -1139,7 +1144,9 @@ TEST_CASE ("T16b: the VCA knee mapping degrades gracefully toward a 0 dB thresho
         const auto expectedWidth = std::min (static_cast<double> (tableWidth), 2.0 * std::abs (thresholdDb));
         const auto measured = measureKneeWidthDb (thresholdDb, ratio, kneePercent);
 
-        CHECK (measured == Catch::Approx (expectedWidth).margin (0.5));
+        // Same derived bound as T16 above: scan resolution plus derivative
+        // float noise, < 3 * 0.01 / 0.8 = 0.04 dB.
+        CHECK (measured == Catch::Approx (expectedWidth).margin (0.05));
 
         // Monotonically narrowing as the threshold approaches 0 dB.
         CHECK (measured <= previousWidth + 0.5);

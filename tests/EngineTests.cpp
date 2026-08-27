@@ -599,7 +599,15 @@ TEST_CASE ("T19: per-band GR taps match the measured reduction, idle bands repor
     INFO ("measured=" << measuredReductionDb << " dB reported=" << reportedReductionDb << " dB");
 
     CHECK (reportedReductionDb < -3.0f);
-    CHECK (reportedReductionDb == Catch::Approx (measuredReductionDb).margin (0.5f));
+    // Derived skew between the two numbers (both in dB):
+    //   - measured includes the soloed Mid band's own LR4 skirts at 1 kHz
+    //     (HP @ 200 Hz: -0.014, LP @ 3 kHz: -0.107), which read as an extra
+    //     -0.12 of "reduction" that the tap never applies;
+    //   - the tap publishes the block's DEEPEST gain, which sits below the
+    //     block average by the envelope's release droop across a half-period,
+    //     (1 - 1/8) * 20*log10(e) * 2*pi * 0.5 ms / 600 ms = 0.04.
+    // Net skew < 0.16; 0.2 covers it.
+    CHECK (reportedReductionDb == Catch::Approx (measuredReductionDb).margin (0.2f));
 
     // The bypassed bands report exactly nothing - a ratio of 1:1 is an exact
     // unity gain, so there is no rounding to allow for.

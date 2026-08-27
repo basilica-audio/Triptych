@@ -1,5 +1,7 @@
 #include "TriptychEngine.h"
 
+#include <cmath>
+
 #include <algorithm>
 
 namespace
@@ -29,6 +31,11 @@ TriptychEngine::TriptychEngine() = default;
 
 void TriptychEngine::prepare (const juce::dsp::ProcessSpec& spec)
 {
+    // One second at the prepared rate - see restFlushDwellSamples.
+    restFlushDwellSamples = static_cast<juce::int64> (std::llround (spec.sampleRate > 0.0 ? spec.sampleRate : 48000.0));
+    silentInputStreak = 0;
+    restFlushed = false;
+
     sampleRate = spec.sampleRate;
 
     lowMidCrossover.prepare (spec);
@@ -208,6 +215,61 @@ void TriptychEngine::process (juce::dsp::AudioBlock<float>& block,
 
     size_t position = 0;
 
+    // Exact-zero rest guarantee (fleet audit class 2b, issue #43): with
+    // JUCE_DSP_ENABLE_SNAP_TO_ZERO=0 the juce_dsp filters
+    // (LinkwitzRileyFilter crossovers, BallisticsFilter envelopes) no
+    // longer snap their state to zero once per block, and the crossover
+    // recursions rest on a rounding/FTZ fixed point instead of decaying
+    // (measured: a constant ~7.8e-38 resting output on arm64, ~5.7e-36 on
+    // x86_64 - the same class Miserere#46 and Firmament#35 fixed). The
+    // silence-gated flush below restores what the library pass provided,
+    // at engine scope and off the hot path: the scan short-circuits at the
+    // first non-zero sample, so it costs nothing while programme material
+    // plays. The sidechain counts as input here - flushing detector
+    // crossover state while an external key is still driving the
+    // detectors would perturb the commanded gain.
+    bool inputIsSilent = true;
+
+    for (size_t channel = 0; channel < numChannels && inputIsSilent; ++channel)
+    {
+        const auto* data = block.getChannelPointer (channel);
+
+        for (size_t sample = 0; sample < requestedSamples; ++sample)
+        {
+            if (data[sample] != 0.0f)
+            {
+                inputIsSilent = false;
+                break;
+            }
+        }
+    }
+
+    if (inputIsSilent && sidechain != nullptr)
+    {
+        for (size_t channel = 0; channel < sidechain->getNumChannels() && inputIsSilent; ++channel)
+        {
+            const auto* data = sidechain->getChannelPointer (channel);
+            const auto sidechainSamples = sidechain->getNumSamples();
+
+            for (size_t sample = 0; sample < sidechainSamples; ++sample)
+            {
+                if (data[sample] != 0.0f)
+                {
+                    inputIsSilent = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (inputIsSilent)
+        silentInputStreak += static_cast<juce::int64> (requestedSamples);
+    else
+    {
+        silentInputStreak = 0;
+        restFlushed = false;
+    }
+
     // The external sidechain is only usable if it actually carries channels
     // and covers the whole block; anything else (bus disabled, host handing us
     // a short buffer) falls back to internal keying silently.
@@ -233,6 +295,33 @@ void TriptychEngine::process (juce::dsp::AudioBlock<float>& block,
         }
 
         position += chunkSamples;
+    }
+
+    // The dwell guarantees no in-flight audio (the lookahead and dry-path
+    // delays are a few milliseconds, orders of magnitude below one second)
+    // can be swallowed: only after a full second of contiguous silent
+    // input AND a residue already below the library's own snap threshold
+    // is the engine considered drained. One-shot per silent stretch;
+    // reset() pins the mute/solo ramps to their commanded values (see its
+    // body), so wake-up behaviour is unchanged.
+    if (inputIsSilent && ! restFlushed && silentInputStreak >= restFlushDwellSamples)
+    {
+        auto residue = 0.0f;
+
+        for (size_t channel = 0; channel < numChannels; ++channel)
+        {
+            const auto* data = block.getChannelPointer (channel);
+
+            for (size_t sample = 0; sample < requestedSamples; ++sample)
+                residue = juce::jmax (residue, std::abs (data[sample]));
+        }
+
+        if (residue < restFlushThreshold)
+        {
+            reset();
+            block.clear();
+            restFlushed = true;
+        }
     }
 }
 

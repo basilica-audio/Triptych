@@ -505,3 +505,153 @@ TEST_CASE ("T15: extreme v0.5.0 parameter settings survive NaN/Inf/denormal inpu
         }
     }
 }
+
+// =========================================================================
+// Fleet audit class 2b (issue #43): the decaying-tail denormal guard.
+//
+// The fleet ships with JUCE_DSP_ENABLE_SNAP_TO_ZERO=0 and relies wholly on
+// the juce::ScopedNoDenormals held across processBlock() for its denormal
+// discipline. That flag also silenced the per-block snapToZero() pass
+// inside the two juce::dsp classes carrying this plugin's recursive state:
+// LinkwitzRileyFilter (both crossovers, per band and channel) and
+// BallisticsFilter (each band's compressor envelope). This test is what
+// proves the FTZ path covers them: a loud burst charges every crossover,
+// envelope, lookahead line and the high-band limiter, then digital silence
+// must leave
+//   (a) no subnormal output samples (FP_ZERO/FP_NORMAL only) - guaranteed
+//       while the ScopedNoDenormals holds, tripped on every platform the
+//       moment anyone drops it or adds a path outside its scope;
+//   (b) an exact-zero rest - a state parked on a small-but-normal rounding
+//       fixed point (the Miserere#46 failure class: an HPF-like TDF2
+//       state resting at ~1e-34 on x86, sustained indefinitely) fails
+//       this even with FTZ on. The +12 dB per-band makeup keeps any such
+//       parked crossover state amplified into visibility, and the gates
+//       stay OFF precisely so nothing attenuates the observable rest
+//       (their BallisticsFilter states are the same class the compressors
+//       already exercise);
+//   (c) silent blocks no dearer than busy blocks - the audible symptom of
+//       denormal grinding on Intel is a plugin that slows down exactly
+//       when the track goes quiet. Both timed loops share one body, so
+//       the ratio isolates DSP cost. The 10x bound derives from the
+//       failure mode (Intel's subnormal microcode assist costs 10-100x
+//       per op), not from noise: scheduler jitter on a mean over ~840
+//       blocks stays within a few tens of percent.
+TEST_CASE ("After a loud burst, a silent tail decays to exact-zero rest with no denormal residue",
+           "[robustness][denormal]")
+{
+    constexpr double sampleRate = 48000.0;
+    constexpr int blockSize = 512;
+
+    TriptychAudioProcessor processor;
+
+    // All three bands compressing hard with makeup high (amplifies any
+    // parked upstream state), lookahead and the high-band limiter engaged,
+    // mix fully wet.
+    setAllBandParams (processor, -45.0f, 8.0f, 5.0f, 200.0f, 12.0f);
+    setParam (processor, ParamIDs::lookahead, 1.0f);
+    setParam (processor, ParamIDs::highLimiterEnabled, 1.0f);
+    setParam (processor, ParamIDs::highLimiterThreshold, -12.0f);
+    setParam (processor, ParamIDs::mix, 100.0f);
+
+    processor.prepareToPlay (sampleRate, blockSize);
+
+    juce::AudioBuffer<float> buffer (2, blockSize);
+    juce::MidiBuffer midi;
+
+    constexpr auto blocksPerSecond = static_cast<int> (sampleRate) / blockSize;
+
+    // Two seconds of hot programme, timing the second second with the same
+    // loop body as the silent loop below.
+    for (int block = 0; block < blocksPerSecond; ++block)
+    {
+        TestHelpers::fillWithSine (buffer, sampleRate, 110.0, 0.9f,
+                                   static_cast<juce::int64> (block) * blockSize);
+        processor.processBlock (buffer, midi);
+    }
+
+    const auto busyStart = juce::Time::getHighResolutionTicks();
+
+    for (int block = 0; block < blocksPerSecond; ++block)
+    {
+        TestHelpers::fillWithSine (buffer, sampleRate, 110.0, 0.9f,
+                                   static_cast<juce::int64> (block) * blockSize);
+        processor.processBlock (buffer, midi);
+        REQUIRE (TestHelpers::allSamplesFinite (buffer));
+    }
+
+    const auto busyTicks = juce::Time::getHighResolutionTicks() - busyStart;
+
+    // Ten seconds of digital silence. The first two seconds legitimately
+    // carry the crossover ring-out, the envelopes' release, the lookahead
+    // line draining and the engine's one-second rest-flush dwell (see
+    // TriptychEngine.h); after that, any surviving non-zero sample is a
+    // parked state.
+    constexpr int silentBlocks = 10 * blocksPerSecond;
+
+    float worstTail = 0.0f;
+    int subnormalSamples = 0;
+
+    const auto silentStart = juce::Time::getHighResolutionTicks();
+
+    for (int block = 0; block < silentBlocks; ++block)
+    {
+        buffer.clear();
+        processor.processBlock (buffer, midi);
+        REQUIRE (TestHelpers::allSamplesFinite (buffer));
+
+        // The subnormal census runs from the FIRST silent block: with
+        // FTZ/DAZ engaged no output sample can ever classify as subnormal,
+        // while without it the decaying tail itself sweeps through the
+        // subnormal range on its way down and trips this on every
+        // platform. worstTail, by contrast, only counts after the
+        // legitimate ring-out window.
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+        {
+            const auto* data = buffer.getReadPointer (channel);
+
+            for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+            {
+                const auto classification = std::fpclassify (data[sample]);
+
+                if (classification != FP_ZERO && classification != FP_NORMAL)
+                    ++subnormalSamples;
+            }
+        }
+
+        if (block < 2 * blocksPerSecond)
+            continue;
+
+        worstTail = juce::jmax (worstTail, TestHelpers::peakAbsolute (buffer));
+    }
+
+    const auto silentTicks = juce::Time::getHighResolutionTicks() - silentStart;
+
+    INFO ("worst tail after 2 s of silence = " << worstTail
+          << ", subnormal samples = " << subnormalSamples);
+
+    // (a) FTZ discipline covers the whole output path.
+    CHECK (subnormalSamples == 0);
+
+    // (b) True rest - measured at exactly zero on both arm64 (native) and
+    // x86_64 (Rosetta 2, SSE mul/add rounding like the Windows leg).
+    CHECK (worstTail == 0.0f);
+
+    // (c) Silence must not cost more than programme (derivation above).
+    const auto busyPerBlock = static_cast<double> (busyTicks) / blocksPerSecond;
+    const auto silentPerBlock = static_cast<double> (silentTicks) / silentBlocks;
+
+    INFO ("silent block cost " << silentPerBlock << " ticks vs busy " << busyPerBlock);
+    CHECK (silentPerBlock <= busyPerBlock * 10.0);
+
+    // And the engine wakes up cleanly (a few blocks: the lookahead delay
+    // and the envelopes need a moment before output is fully back).
+    for (int block = 0; block < 8; ++block)
+    {
+        TestHelpers::fillWithSine (buffer, sampleRate, 110.0, 0.9f,
+                                   static_cast<juce::int64> (block) * blockSize);
+        processor.processBlock (buffer, midi);
+        REQUIRE (TestHelpers::allSamplesFinite (buffer));
+    }
+
+    CHECK (TestHelpers::peakAbsolute (buffer) > 1.0e-3f);
+}

@@ -321,5 +321,18 @@ private:
 
     double sampleRate = 44100.0;
 
+    // Rest-flush machinery (fleet audit class 2b, issue #43) - see
+    // process(). Threshold = the exact value juce_dsp's own per-block
+    // snapToZero() pass used (JUCE_SNAP_TO_ZERO,
+    // juce_FloatVectorOperations.h, JUCE 8.0.14) before the fleet disabled
+    // JUCE_DSP_ENABLE_SNAP_TO_ZERO; dwell = one second of contiguous
+    // silent input at the prepared rate, an order-of-magnitude upper bound
+    // over the lookahead/dry-path delay, so no in-flight audio can be
+    // swallowed.
+    static constexpr float restFlushThreshold = 1.0e-8f;
+    juce::int64 restFlushDwellSamples = 48000;
+    juce::int64 silentInputStreak = 0;
+    bool restFlushed = false;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TriptychEngine)
 };

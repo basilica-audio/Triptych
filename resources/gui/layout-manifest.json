@@ -1,0 +1,649 @@
+{
+ "family": "basilica-wave3-composited-plate",
+ "plate": {
+  "binary": "plate_triptych_png",
+  "width1x": 1264,
+  "height1x": 848
+ },
+ "sprites": {
+  "knob": {
+   "binary": "sprite_knob_png",
+   "width": 160,
+   "height": 160,
+   "knobCx": 80,
+   "knobCy": 80,
+   "knobRadius": 63
+  },
+  "toggle": {
+   "binary": "sprite_toggle_up_png",
+   "width": 117,
+   "height": 129
+  },
+  "gr": {
+   "binary": "sprite_gr_dial_png",
+   "width": 332,
+   "height": 332,
+   "contentDiameter": 300,
+   "pivotXFrac": 0.5,
+   "pivotYFrac": 0.64,
+   "needleLengthFrac": 0.3
+  }
+ },
+ "grTicks": [
+  [
+   -20,
+   -48.0
+  ],
+  [
+   -10,
+   -26.0
+  ],
+  [
+   -6,
+   -8.0
+  ],
+  [
+   -3,
+   14.0
+  ],
+  [
+   0,
+   46.0
+  ]
+ ],
+ "controls": [
+  {
+   "id": "lowMidSplit",
+   "type": "knob",
+   "label": "LOW/MID",
+   "cx": 552,
+   "cy": 172,
+   "size": 52,
+   "sweep": 270
+  },
+  {
+   "id": "midHighSplit",
+   "type": "knob",
+   "label": "MID/HIGH",
+   "cx": 632,
+   "cy": 172,
+   "size": 52,
+   "sweep": 270
+  },
+  {
+   "id": "output",
+   "type": "knob",
+   "label": "OUTPUT",
+   "cx": 712,
+   "cy": 172,
+   "size": 52,
+   "sweep": 270
+  },
+  {
+   "id": "meter_lowGr",
+   "type": "gr",
+   "tap": "lowGr",
+   "label": "",
+   "cx": 410,
+   "cy": 282,
+   "size": 76
+  },
+  {
+   "id": "lowThreshold",
+   "type": "knob",
+   "label": "THRESHOLD",
+   "cx": 340,
+   "cy": 342,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "lowRatio",
+   "type": "knob",
+   "label": "RATIO",
+   "cx": 410,
+   "cy": 342,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "lowKnee",
+   "type": "knob",
+   "label": "KNEE",
+   "cx": 480,
+   "cy": 342,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "lowAttack",
+   "type": "knob",
+   "label": "ATTACK",
+   "cx": 340,
+   "cy": 404,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "lowRelease",
+   "type": "knob",
+   "label": "RELEASE",
+   "cx": 410,
+   "cy": 404,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "lowMakeup",
+   "type": "knob",
+   "label": "MAKEUP",
+   "cx": 480,
+   "cy": 404,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "lowRange",
+   "type": "knob",
+   "label": "RANGE",
+   "cx": 340,
+   "cy": 508,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "lowSideThreshold",
+   "type": "knob",
+   "label": "SIDE THRES",
+   "cx": 410,
+   "cy": 508,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "lowSideRatio",
+   "type": "knob",
+   "label": "SIDE RATIO",
+   "cx": 480,
+   "cy": 508,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "lowGateThreshold",
+   "type": "knob",
+   "label": "GATE THRES",
+   "cx": 340,
+   "cy": 574,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "lowGateRatio",
+   "type": "knob",
+   "label": "GATE RATIO",
+   "cx": 410,
+   "cy": 574,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "lowGateAttack",
+   "type": "knob",
+   "label": "GATE ATT",
+   "cx": 480,
+   "cy": 574,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "lowGateRelease",
+   "type": "knob",
+   "label": "GATE REL",
+   "cx": 340,
+   "cy": 640,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "lowRangeEnabled",
+   "type": "toggle",
+   "label": "RANGE",
+   "cx": 330,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "lowMidSideEnabled",
+   "type": "toggle",
+   "label": "M-S",
+   "cx": 370,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "lowGateEnabled",
+   "type": "toggle",
+   "label": "GATE",
+   "cx": 410,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "lowMute",
+   "type": "toggle",
+   "label": "MUTE",
+   "cx": 450,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "lowSolo",
+   "type": "toggle",
+   "label": "SOLO",
+   "cx": 490,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "meter_midGr",
+   "type": "gr",
+   "tap": "midGr",
+   "label": "",
+   "cx": 630,
+   "cy": 282,
+   "size": 76
+  },
+  {
+   "id": "midThreshold",
+   "type": "knob",
+   "label": "THRESHOLD",
+   "cx": 560,
+   "cy": 342,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "midRatio",
+   "type": "knob",
+   "label": "RATIO",
+   "cx": 630,
+   "cy": 342,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "midKnee",
+   "type": "knob",
+   "label": "KNEE",
+   "cx": 700,
+   "cy": 342,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "midAttack",
+   "type": "knob",
+   "label": "ATTACK",
+   "cx": 560,
+   "cy": 404,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "midRelease",
+   "type": "knob",
+   "label": "RELEASE",
+   "cx": 630,
+   "cy": 404,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "midMakeup",
+   "type": "knob",
+   "label": "MAKEUP",
+   "cx": 700,
+   "cy": 404,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "midRange",
+   "type": "knob",
+   "label": "RANGE",
+   "cx": 560,
+   "cy": 508,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "midSideThreshold",
+   "type": "knob",
+   "label": "SIDE THRES",
+   "cx": 630,
+   "cy": 508,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "midSideRatio",
+   "type": "knob",
+   "label": "SIDE RATIO",
+   "cx": 700,
+   "cy": 508,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "midGateThreshold",
+   "type": "knob",
+   "label": "GATE THRES",
+   "cx": 560,
+   "cy": 574,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "midGateRatio",
+   "type": "knob",
+   "label": "GATE RATIO",
+   "cx": 630,
+   "cy": 574,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "midGateAttack",
+   "type": "knob",
+   "label": "GATE ATT",
+   "cx": 700,
+   "cy": 574,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "midGateRelease",
+   "type": "knob",
+   "label": "GATE REL",
+   "cx": 560,
+   "cy": 640,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "midRangeEnabled",
+   "type": "toggle",
+   "label": "RANGE",
+   "cx": 550,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "midMidSideEnabled",
+   "type": "toggle",
+   "label": "M-S",
+   "cx": 590,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "midGateEnabled",
+   "type": "toggle",
+   "label": "GATE",
+   "cx": 630,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "midMute",
+   "type": "toggle",
+   "label": "MUTE",
+   "cx": 670,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "midSolo",
+   "type": "toggle",
+   "label": "SOLO",
+   "cx": 710,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "meter_highGr",
+   "type": "gr",
+   "tap": "highGr",
+   "label": "",
+   "cx": 850,
+   "cy": 282,
+   "size": 76
+  },
+  {
+   "id": "highThreshold",
+   "type": "knob",
+   "label": "THRESHOLD",
+   "cx": 780,
+   "cy": 342,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highRatio",
+   "type": "knob",
+   "label": "RATIO",
+   "cx": 850,
+   "cy": 342,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highKnee",
+   "type": "knob",
+   "label": "KNEE",
+   "cx": 920,
+   "cy": 342,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highAttack",
+   "type": "knob",
+   "label": "ATTACK",
+   "cx": 780,
+   "cy": 404,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highRelease",
+   "type": "knob",
+   "label": "RELEASE",
+   "cx": 850,
+   "cy": 404,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highMakeup",
+   "type": "knob",
+   "label": "MAKEUP",
+   "cx": 920,
+   "cy": 404,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highRange",
+   "type": "knob",
+   "label": "RANGE",
+   "cx": 780,
+   "cy": 508,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highSideThreshold",
+   "type": "knob",
+   "label": "SIDE THRES",
+   "cx": 850,
+   "cy": 508,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highSideRatio",
+   "type": "knob",
+   "label": "SIDE RATIO",
+   "cx": 920,
+   "cy": 508,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highGateThreshold",
+   "type": "knob",
+   "label": "GATE THRES",
+   "cx": 780,
+   "cy": 574,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highGateRatio",
+   "type": "knob",
+   "label": "GATE RATIO",
+   "cx": 850,
+   "cy": 574,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highGateAttack",
+   "type": "knob",
+   "label": "GATE ATT",
+   "cx": 920,
+   "cy": 574,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highGateRelease",
+   "type": "knob",
+   "label": "GATE REL",
+   "cx": 780,
+   "cy": 640,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highLimiterThreshold",
+   "type": "knob",
+   "label": "LIMITER",
+   "cx": 850,
+   "cy": 640,
+   "size": 42,
+   "sweep": 270
+  },
+  {
+   "id": "highRangeEnabled",
+   "type": "toggle",
+   "label": "RANGE",
+   "cx": 760,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "highMidSideEnabled",
+   "type": "toggle",
+   "label": "M-S",
+   "cx": 796,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "highGateEnabled",
+   "type": "toggle",
+   "label": "GATE",
+   "cx": 832,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "highMute",
+   "type": "toggle",
+   "label": "MUTE",
+   "cx": 868,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "highSolo",
+   "type": "toggle",
+   "label": "SOLO",
+   "cx": 904,
+   "cy": 712,
+   "size": 30
+  },
+  {
+   "id": "highLimiterEnabled",
+   "type": "toggle",
+   "label": "LIM",
+   "cx": 940,
+   "cy": 712,
+   "size": 30
+  }
+ ],
+ "labels": [
+  {
+   "text": "TRIPTYCH",
+   "cx": 632,
+   "cy": 112,
+   "h": 32,
+   "style": "wordmark"
+  },
+  {
+   "text": "BASILICA AUDIO",
+   "cx": 632,
+   "cy": 138,
+   "h": 11,
+   "style": "caption"
+  },
+  {
+   "text": "LOW BAND",
+   "cx": 410,
+   "cy": 228,
+   "h": 13,
+   "style": "section"
+  },
+  {
+   "text": "MID BAND",
+   "cx": 630,
+   "cy": 228,
+   "h": 13,
+   "style": "section"
+  },
+  {
+   "text": "HIGH BAND",
+   "cx": 850,
+   "cy": 228,
+   "h": 13,
+   "style": "section"
+  }
+ ],
+ "rules": [
+  {
+   "x1": 520,
+   "y1": 252,
+   "x2": 520,
+   "y2": 750
+  },
+  {
+   "x1": 740,
+   "y1": 252,
+   "x2": 740,
+   "y2": 750
+  }
+ ]
+}

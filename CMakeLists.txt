@@ -76,12 +76,23 @@ juce_add_binary_data(TriptychBinaryData SOURCES
     presets/factory/hardLimiterCeiling.json
     presets/factory/glueMaster.json
     resources/i18n/de.txt
-    # Suite typography (M3 vector editor, issue #4): EB Garamond, OFL
-    # licensed (resources/fonts/OFL-EBGaramond.txt) - consumed by
-    # src/gui/BasilicaLookAndFeel.cpp as the single source of every glyph
-    # the fully JUCE-drawn editor renders.
+    # Suite typography: EB Garamond, OFL licensed
+    # (resources/fonts/OFL-EBGaramond.txt) - consumed by
+    # src/gui/PlateTypography.h as the single source of every glyph the
+    # wave-3 composited editor letters live over the plate.
     resources/fonts/EBGaramond-Regular.ttf
     resources/fonts/EBGaramond-SemiBold.ttf
+    # Wave-3 photoreal "composited plate" GUI (see src/PluginEditor.h): the
+    # approved empty master plate (2k per DECISIONS.md D5), the suite
+    # control sprites (feathered-alpha crops from approved master renders -
+    # provenance in the gui-pipeline scaffold's sprite-library/
+    # provenance.md), and the layout manifest that maps every parameter id
+    # to a sprite type + plate position.
+    resources/gui/plate_triptych.png
+    resources/gui/sprite_knob.png
+    resources/gui/sprite_toggle_up.png
+    resources/gui/sprite_gr_dial.png
+    resources/gui/layout-manifest.json
 )
 
 # ==============================================================================
@@ -163,6 +174,10 @@ target_link_libraries(Tests PRIVATE SharedCode Catch2::Catch2)
 target_compile_definitions(Tests PRIVATE
     $<TARGET_PROPERTY:Triptych,COMPILE_DEFINITIONS>
     JUCE_MODAL_LOOPS_PERMITTED=1
+    # tests/gui/EditorSnapshotTests.cpp regenerates docs/gui-preview.png
+    # from the real editor draw chain (suite proof-chain rule) - it needs
+    # the repository root to land the file next to the docs it documents.
+    TRIPTYCH_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 set_target_properties(Tests PROPERTIES XCODE_GENERATE_SCHEME ON)

@@ -47,6 +47,10 @@ juce_add_plugin(Triptych
     PLUGIN_CODE Trpt
     FORMATS AU VST3 Standalone
     PRODUCT_NAME "Triptych"
+    COMPANY_WEBSITE "https://basilica-audio.github.io/website/"
+    COMPANY_COPYRIGHT "Copyright (c) 2026 Yves Vogl"
+    DESCRIPTION "Three-band multiband compressor with a Linkwitz-Riley crossover"
+    VST3_CATEGORIES Fx Dynamics
     ICON_BIG "docs/assets/icon.png"
     COPY_PLUGIN_AFTER_BUILD TRUE
     IS_SYNTH FALSE

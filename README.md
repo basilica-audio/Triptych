@@ -7,14 +7,14 @@
 [![CI](https://github.com/basilica-audio/triptych/actions/workflows/ci.yml/badge.svg)](https://github.com/basilica-audio/triptych/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-> **Work in progress.** Triptych is pre-1.0 and under active development. Binaries for macOS and Windows are available from the [Releases](../../releases) page (currently unsigned — see the release notes); building from source works too. Expect breaking changes until v1.0.0 ships (see [Roadmap](#roadmap)).
+> **Work in progress.** Triptych is pre-1.0 and under active development. Binaries for macOS and Windows are available from the [Releases](../../releases) page (macOS builds are signed with a Developer ID certificate, notarized and stapled); building from source works too. Expect breaking changes until v1.0.0 ships (see [Roadmap](#roadmap)).
 
 <!-- ==BEGIN BODY== (plugin engineer: replace this block with What it is / Features / Signal flow / Roadmap) -->
 ## What it is
 
 Triptych is a 3-band multiband compressor built on JUCE 8, aimed at taming dense, heavy mixes: two cascaded 4th-order Linkwitz-Riley (LR4) crossovers split the signal into Low/Mid/High bands, each with its own independent threshold/ratio/knee/attack/release/makeup compressor and Mute/Solo, before the three bands are gated and summed back together and trimmed by a master output stage. The High band can additionally engage a brickwall-style limiter. The LR4 crossover's defining property - a magnitude-flat low+high sum - means that with every band's compressor disabled, Triptych is an exact, bit-identical passthrough of the input. See [`docs/manual.md`](docs/manual.md) for the full user manual.
 
-## Features (v0.2.0 scope)
+## Features
 
 - **Low/Mid Split** and **Mid/High Split** - crossover points, 40 Hz - 1 kHz and 400 Hz - 12 kHz respectively, with a minimum runtime separation so automation can never invert band order
 - **Per-band compression** (Low/Mid/High), each with:
@@ -28,7 +28,7 @@ Triptych is a 3-band multiband compressor built on JUCE 8, aimed at taming dense
 - **High-band limiter option** - an optional brickwall-style `juce::dsp::Limiter` stage after the High band's compressor, threshold -24 to 0 dB (default -3 dB), guaranteeing the High band never exceeds 0 dBFS once engaged
 - **Output** - master trim after the three (gated) bands are summed, -24 to +24 dB
 - **Zero added latency** - the LR4 crossovers, the envelope follower driving the per-band gain computer, and the optional High-band limiter are all minimum-phase/causal with no lookahead, so no dry-path delay compensation is needed anywhere in the plugin
-- **Eight factory presets** plus a full preset system (save/load, import/export, banks, default) - see [`docs/presets.md`](docs/presets.md)
+- **Nine factory presets** plus a full preset system (save/load, import/export, banks, default) - see [`docs/presets.md`](docs/presets.md)
 - German localisation of the preset bar's interface text
 - Full state save/recall via `AudioProcessorValueTreeState`, tolerant of pre-v0.2.0 saved sessions
 
@@ -55,9 +55,16 @@ See [`docs/architecture.md`](docs/architecture.md) for the full breakdown, inclu
 | M4 | Release engineering - signing, notarization, installers, v1.0.0 | Planned |
 <!-- ==END BODY== -->
 
+## Documentation
+
+- [`docs/manual.md`](docs/manual.md) — the user manual: what every control does, and how to use it
+- [`docs/presets.md`](docs/presets.md) — what each factory preset is for
+- [`CHANGELOG.md`](CHANGELOG.md) — what shipped in each release
+- [Triptych on basilica-audio.github.io](https://basilica-audio.github.io/website/triptych/) — the product page (English and German)
+
 ## Installation
 
-No pre-built binaries are published yet (see the work-in-progress notice above). Once releases begin, installation will follow the standard plugin locations:
+Download the archive for your platform from the [Releases](../../releases) page and copy the bundles into the standard plugin locations:
 
 **macOS**
 

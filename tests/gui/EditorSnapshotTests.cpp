@@ -210,7 +210,14 @@ TEST_CASE ("Plate typography brightens the label zones over the raw plate", "[gu
                                                         (int) label.cy - (int) label.h / 2
                                                             + TriptychAudioProcessorEditor::topStripHeight1x,
                                                         w, (int) label.h + 4);
-        const auto plateArea = snapshotArea.translated (0, -TriptychAudioProcessorEditor::topStripHeight1x);
+        // The plate asset is a 2k render drawn at plateWidth1x - map the
+        // 1x box into the asset's own pixel space before sampling it.
+        const auto plateScale = (float) plate.getWidth() / (float) manifest.plateWidth1x;
+        const auto plateArea1x = snapshotArea.translated (0, -TriptychAudioProcessorEditor::topStripHeight1x);
+        const auto plateArea = juce::Rectangle<int> ((int) ((float) plateArea1x.getX() * plateScale),
+                                                     (int) ((float) plateArea1x.getY() * plateScale),
+                                                     (int) ((float) plateArea1x.getWidth() * plateScale),
+                                                     (int) ((float) plateArea1x.getHeight() * plateScale));
 
         // Gold lettering against the near-black plate: the snapshot's label
         // box must contain clearly more bright pixels than the raw plate's

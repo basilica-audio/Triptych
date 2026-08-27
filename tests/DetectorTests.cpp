@@ -108,7 +108,18 @@ TEST_CASE ("T3: RMS detection reads 3.01 dB below peak detection on a steady sin
         const auto rmsDb = juce::Decibels::gainToDecibels (settledValue (rmsTrace));
 
         INFO ("sampleRate=" << sampleRate << " peakDb=" << peakDb << " rmsDb=" << rmsDb);
-        CHECK ((peakDb - rmsDb) == Catch::Approx (3.01f).margin (0.5f));
+        // Derived error budget (all dB; juce::dsp::BallisticsFilter decays by
+        // exp (-2*pi*dt/tau), JUCE 8.0.14 juce_BallisticsFilter.cpp):
+        //   - peak path: release droop across a rectified-sine half-period,
+        //     20*log10(e) * 2*pi * 0.5 ms / 1000 ms = 0.027, minus what the
+        //     0.1 ms attack recovers at the next peak sample; the 512-sample
+        //     average sits mid-band, so it reads ~0.02 low;
+        //   - RMS path: the 5 ms mean-square one-pole leaves ~0.07 of 2 kHz
+        //     ripple, and the fast-attack/slow-release ballistics stage after
+        //     it rides that ripple's top, so it reads ~0.06 high.
+        // The difference therefore reads up to ~0.13 low and never high;
+        // 0.15 covers it at every tested rate.
+        CHECK ((peakDb - rmsDb) == Catch::Approx (3.01f).margin (0.15f));
     }
 }
 

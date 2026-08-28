@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A factory-preset headroom gate** (`tests/PresetHeadroomTests.cpp`). Every shipped factory
+  preset is rendered through the real `AudioProcessor` at 48 kHz against the suite reference
+  programme (four plucked notes spanning E1 41.203 Hz to A5 880.000 Hz, twelve harmonics each,
+  peak-normalised to −12 dBFS) and its output peak asserted below 0 dBFS. It asserts how many
+  factory presets it exercised, so a preset library that stopped loading is distinguishable
+  from every preset passing, and it measures **both** ways a user arrives at a preset — a
+  restored session and a mid-session click in the preset browser. The recall path is held to
+  "below full scale **or** below where you already were", so a transition is blamed only for
+  clipping it introduced. All nine presets pass both paths.
+
+### Fixed
+
+- **`Parallel-Style Density` pushed the reference programme to +2.94 dBFS.** The preset is
+  built on **upward** compression — all three bands at ratio 0.6:1 below a −38 dB threshold
+  with a 10 dB range — which is exactly its intent (raise the quiet material until the mix
+  feels dense), and it ships a further +1.5 dB of `Output` on top of it, uncompensated. The
+  upward gain is deliberate voicing and is untouched; the missing compensation is not.
+
+  `Output` goes from **+1.50 dB to −1.74 dB**: the preset's own measured overshoot plus a
+  −0.3 dBFS headroom target, rounded up to the parameter's 0.01 dB step. Nothing else in the
+  preset changed, so the density voicing is bit-for-bit what it was and only the level moved.
+  It now renders at **−0.30 dBFS**.
+
+  The other eight presets sit between −1.00 and −12.27 dBFS and are **not raised** — that would
+  be level-matching the set, which is a taste question and stays open.
+
 ### Changed
 
 - **The suite now presents itself as Basilica Audio in every host.** `COMPANY_NAME` moves from

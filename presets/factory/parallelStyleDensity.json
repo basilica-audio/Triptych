@@ -63,7 +63,7 @@
         "highSolo": false,
         "highLimiterEnabled": false,
         "highLimiterThreshold": -3.0,
-        "output": 1.5,
+        "output": -1.74,
         "scSource": 0,
         "scListen": 0,
         "crossoverSlope": 1,

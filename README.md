@@ -17,17 +17,34 @@ Triptych is a 3-band multiband compressor built on JUCE 8, aimed at taming dense
 ## Features
 
 - **Low/Mid Split** and **Mid/High Split** - crossover points, 40 Hz - 1 kHz and 400 Hz - 12 kHz respectively, with a minimum runtime separation so automation can never invert band order
+- **Crossover Slope** - 12, 24 (Linkwitz-Riley, default) or 48 dB/octave, shared by both crossover points
 - **Per-band compression** (Low/Mid/High), each with:
   - **Threshold** - -60 to 0 dB (per-band defaults: Low -24, Mid -30, High -20)
-  - **Ratio** - 1:1 (bypass) to 20:1 (per-band defaults: Low 2.5:1, Mid 1.8:1, High 2:1)
-  - **Knee** *(new in v0.2.0)* - 0-100%, default 50%, threshold-relative soft-knee transition (0% is v0.1's exact hard knee)
+  - **Ratio** - 1:5 (upward expansion) through 1:1 (exact bypass) to 20:1 (downward compression) (per-band defaults: Low 2.5:1, Mid 1.8:1, High 2:1)
+  - **Knee** - 0-100%, default 50%, threshold-relative soft-knee transition (0% is an exact hard knee)
   - **Attack** - 0.1 - 100 ms (per-band defaults: Low 25, Mid 10, High 5)
   - **Release** - 10 - 1000 ms (per-band defaults: Low 180, Mid 100, High 55)
   - **Makeup** - -12 to +24 dB
+  - **Detector** - Peak or RMS envelope detection, default Peak
+  - **Auto Release** - programme-dependent release, off by default
+  - **Character** - Clean or VCA gain-computer voicing, default Clean
+  - **Stereo Link** - 0-100%, default 0%
+- **Per-band Range** (optional, Low/Mid/High) - clamps the maximum gain change, cut or boost, a band's compressor can apply, 0-30 dB, off by default (12 dB once engaged)
+- **Per-band Mid/Side processing** (optional, Low/Mid/High) - compresses the Side signal independently, with its own Threshold (same range and default as the band's main Threshold) and Ratio (1:5 to 20:1, default 1:1 bypass)
 - **Per-band Mute/Solo** (Low/Mid/High) - console-style semantics: Mute always wins, soloing isolates the soloed band(s) while their compressor keeps running underneath (no re-attack pop on unmute)
+- **Per-band downward expansion / Gate** (optional, Low/Mid/High), each with:
+  - **Threshold** - -80 to 0 dB (per-band defaults: Low -50, Mid -55, High -45)
+  - **Ratio** - 1:1 (bypass) to 100:1, default 2:1
+  - **Attack** - 0.1 - 50 ms (per-band defaults: Low 10, Mid 5, High 2)
+  - **Release** - 10 - 2000 ms (per-band defaults: Low 200, Mid 150, High 100)
+  - **Gate Hold** - 0-500 ms, default 0 ms
+  - **Gate Hysteresis** - 0-12 dB of separation between the opening and closing thresholds, default 0 dB
 - **High-band limiter option** - an optional brickwall-style `juce::dsp::Limiter` stage after the High band's compressor, threshold -24 to 0 dB (default -3 dB), guaranteeing the High band never exceeds 0 dBFS once engaged
+- **Sidechain** - **Source** switches the detectors between the plugin's own signal (Internal, default) and an external sidechain feed; **Listen** solos a band's detector-key signal (Off/Low/Mid/High, default Off) so it can be monitored directly
+- **Lookahead** - Off (default), 1.5, 3 or 5 ms, reported to the host as plugin latency
+- **Mix** - global dry/wet, 0-100%, default 100% (fully wet)
 - **Output** - master trim after the three (gated) bands are summed, -24 to +24 dB
-- **Zero added latency** - the LR4 crossovers, the envelope follower driving the per-band gain computer, and the optional High-band limiter are all minimum-phase/causal with no lookahead, so no dry-path delay compensation is needed anywhere in the plugin
+- **Zero added latency by default** - the crossovers, the envelope followers driving the per-band gain computers, and the optional High-band limiter are all minimum-phase/causal with no lookahead of their own; the only source of added latency is the Lookahead control above, which is off by default
 - **Nine factory presets** plus a full preset system (save/load, import/export, banks, default) - see [`docs/presets.md`](docs/presets.md)
 - German localisation of the preset bar's interface text
 - Full state save/recall via `AudioProcessorValueTreeState`, tolerant of pre-v0.2.0 saved sessions
